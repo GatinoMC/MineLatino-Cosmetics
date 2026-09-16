@@ -968,7 +968,7 @@ test('AI assistant exchanges a game session for a short scoped token and stores 
   assert.equal(first.data.message.content, 'Respuesta segura');
   assert.equal(store.aiUsageSince(accountId, 0).requests, 1);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0][0].role, 'system');
+  assert.equal(calls[0].some(message => message.role === 'system'), false);
   assert.equal(calls[0].at(-1).content, '¿Cómo inicio mi recorrido?');
 
   const replay = await request('/v1/ai/chat', { method: 'POST', token: assistant.data.token, data: {
@@ -995,10 +995,10 @@ test('AI assistant token is revoked together with its parent MineLatino session'
 });
 
 test('AI assistant supports an HTTPS OpenAI-compatible chat completions endpoint', async t => {
-  const names = ['AI_PROVIDER','AI_API_KEY','AI_MODEL','AI_BASE_URL','AI_API_STYLE'];
+  const names = ['AI_SOURCE','AI_PROVIDER','AI_API_KEY','AI_MODEL','AI_BASE_URL','AI_API_STYLE'];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => { for (const name of names) previous[name] === undefined ? delete process.env[name] : process.env[name] = previous[name]; });
-  Object.assign(process.env, { AI_PROVIDER: 'openai-compatible', AI_API_KEY: 'test-only-provider-key',
+  Object.assign(process.env, { AI_SOURCE: 'direct', AI_PROVIDER: 'openai-compatible', AI_API_KEY: 'test-only-provider-key',
     AI_MODEL: 'test-model', AI_BASE_URL: 'https://provider.example/v1', AI_API_STYLE: 'chat-completions' });
   let request;
   const { store } = fixture(t);
@@ -1012,6 +1012,44 @@ test('AI assistant supports an HTTPS OpenAI-compatible chat completions endpoint
   assert.equal(JSON.parse(request.options.body).model, 'test-model');
   assert.equal(result.content, 'Respuesta compatible');
   assert.deepEqual(result.usage, { inputTokens: 7, outputTokens: 3 });
+});
+
+test('AI assistant uses the official MineLatino website chat by default', async t => {
+  const names = ['AI_SOURCE','MINELATINO_ASSISTANT_URL','AI_REQUEST_TIMEOUT_SECONDS'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  t.after(() => { for (const name of names) previous[name] === undefined ? delete process.env[name] : process.env[name] = previous[name]; });
+  delete process.env.AI_SOURCE;
+  process.env.MINELATINO_ASSISTANT_URL = 'https://minelatino.net';
+  const calls = [];
+  const { store } = fixture(t);
+  const ai = createAiServiceFromEnv({ store, fetchImpl: async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/asistente')) return new Response(
+      '<html><head><meta name="csrf-token" content="test-csrf-token"></head></html>',
+      { status: 200, headers: { 'content-type': 'text/html', 'set-cookie': 'ml_session=test-session; Path=/; HttpOnly; Secure' } });
+    return Response.json({ success: true, answer: 'Respuesta con el conocimiento oficial', sources: [
+      { title: 'Normas', url: 'https://minelatino.net/normas' },
+    ] });
+  } });
+  const result = await ai.complete([
+    { role: 'user', content: 'Primera pregunta' },
+    { role: 'assistant', content: 'Primera respuesta' },
+    { role: 'user', content: '¿Cuáles son las normas?' },
+  ]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, 'https://minelatino.net/asistente');
+  assert.equal(calls[1].url, 'https://minelatino.net/api/assistant/message');
+  assert.equal(calls[1].options.headers['x-csrf-token'], 'test-csrf-token');
+  assert.match(calls[1].options.headers.Cookie, /^ml_session=test-session$/);
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    question: '¿Cuáles son las normas?',
+    history: [
+      { role: 'user', content: 'Primera pregunta' },
+      { role: 'assistant', content: 'Primera respuesta' },
+    ],
+  });
+  assert.equal(result.content, 'Respuesta con el conocimiento oficial');
+  assert.deepEqual(result.usage, {});
 });
 
 test('AFK Farm time is assigned by admin, metered by server time, and blocks at zero', async t => {

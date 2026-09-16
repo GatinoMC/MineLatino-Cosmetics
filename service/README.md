@@ -56,13 +56,20 @@ administrativos, permisos de archivos, copias verificadas y operación multiinst
 
 ## Asistente IA privado
 
-Configura `AI_PROVIDER=openai`, `AI_API_KEY` y `AI_MODEL` únicamente en el entorno
-privado del servicio. `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_MESSAGE_CHARS`,
-`AI_MAX_CONTEXT_MESSAGES` y `AI_DAILY_REQUEST_LIMIT` son límites operativos opcionales.
-Si falta cualquiera de las tres variables obligatorias, las rutas responden de forma
-segura que el asistente no está disponible.
+De forma predeterminada, el asistente del juego usa `AI_SOURCE=minelatino-web` y
+consulta el mismo chat oficial publicado en `https://minelatino.net/asistente`. El
+servicio obtiene una sesión CSRF anónima para cada mensaje, envía la pregunta junto
+con los últimos seis mensajes y nunca entrega esa cookie temporal al mod.
 
-Para un proveedor OpenAI-compatible usa `AI_PROVIDER=openai-compatible`, una
+`MINELATINO_ASSISTANT_URL` permite cambiar únicamente el origen HTTPS oficial.
+`AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_MESSAGE_CHARS`, `AI_MAX_CONTEXT_MESSAGES` y
+`AI_DAILY_REQUEST_LIMIT` son límites operativos opcionales.
+
+El modo anterior de proveedor directo se conserva solamente como alternativa. Para
+activarlo configura `AI_SOURCE=direct`, `AI_PROVIDER=openai`, `AI_API_KEY` y
+`AI_MODEL` únicamente en el entorno privado del servicio.
+
+Para un proveedor OpenAI-compatible directo usa `AI_PROVIDER=openai-compatible`, una
 `AI_BASE_URL` HTTPS terminada normalmente en `/v1` y
 `AI_API_STYLE=chat-completions`. La URL se valida al iniciar; no puede incluir
 credenciales, query ni fragmento. La clave continúa exclusivamente en Railway.

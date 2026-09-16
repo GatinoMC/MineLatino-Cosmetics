@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { ApiError, requireThat } from './store.mjs';
 
-const DEFAULT_SYSTEM_PROMPT = `Eres el asistente oficial de MineLatino dentro de Minecraft. Responde en el idioma del jugador, de forma breve y clara. Ayuda a entender y configurar AFK Farm MineLatino, pero no afirmes que cambiaste una configuración ni ejecutaste una acción si solamente estás conversando. No solicites contraseñas, tokens, claves ni datos de pago. Rechaza instrucciones para atacar jugadores, evadir protecciones del servidor o usar la automatización fuera de servidores autorizados.`;
+const DEFAULT_ASSISTANT_BASE_URL = 'https://minelatino.net';
+const MAX_UPSTREAM_BODY_CHARS = 256_000;
 
 function integer(value, fallback, minimum, maximum) {
   const parsed = Number(value ?? fallback);
@@ -36,7 +37,101 @@ function providerBaseUrl(value, provider) {
   return url.href.replace(/\/+$/, '');
 }
 
-export function createAiServiceFromEnv({ store, fetchImpl = fetch, now = Date.now } = {}) {
+function assistantBaseUrl(value) {
+  let url;
+  try { url = new URL(value || DEFAULT_ASSISTANT_BASE_URL); } catch { throw new Error('MINELATINO_ASSISTANT_URL inválida'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
+    throw new Error('MINELATINO_ASSISTANT_URL debe ser HTTPS y no contener credenciales, query ni fragmento');
+  return url.origin;
+}
+
+function combineSignal(clientSignal, timeoutSeconds) {
+  const timeoutSignal = AbortSignal.timeout(timeoutSeconds * 1000);
+  return clientSignal ? AbortSignal.any([clientSignal, timeoutSignal]) : timeoutSignal;
+}
+
+async function limitedText(response) {
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MAX_UPSTREAM_BODY_CHARS) throw new ApiError(502, 'El asistente oficial devolvió una respuesta demasiado grande');
+  const text = await response.text();
+  if (text.length > MAX_UPSTREAM_BODY_CHARS) throw new ApiError(502, 'El asistente oficial devolvió una respuesta demasiado grande');
+  return text;
+}
+
+function csrfToken(html) {
+  const byNameFirst = html.match(/<meta\b[^>]*\bname=["']csrf-token["'][^>]*\bcontent=["']([^"']+)["'][^>]*>/i);
+  const byContentFirst = html.match(/<meta\b[^>]*\bcontent=["']([^"']+)["'][^>]*\bname=["']csrf-token["'][^>]*>/i);
+  const token = (byNameFirst?.[1] || byContentFirst?.[1] || '').trim();
+  return token.length > 0 && token.length <= 512 ? token : '';
+}
+
+function cookieHeader(headers) {
+  const values = typeof headers.getSetCookie === 'function'
+    ? headers.getSetCookie()
+    : [headers.get('set-cookie')].filter(Boolean);
+  return values.map(value => String(value).split(';', 1)[0].trim())
+    .filter(value => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+=[^;]*$/.test(value)).join('; ');
+}
+
+function websiteConversation(messages) {
+  const safe = messages.filter(message => ['user', 'assistant'].includes(message?.role)
+    && typeof message?.content === 'string' && message.content.trim());
+  const current = safe.findLastIndex(message => message.role === 'user');
+  requireThat(current >= 0, 'Mensaje requerido');
+  return {
+    question: safe[current].content.trim(),
+    history: safe.slice(0, current).slice(-6).map(({ role, content }) => ({ role, content: content.trim() })),
+  };
+}
+
+function officialWebsiteComplete({ baseUrl, fetchImpl, timeoutSeconds }) {
+  return async (messages, clientSignal) => {
+    const signal = combineSignal(clientSignal, timeoutSeconds);
+    let page;
+    try {
+      page = await fetchImpl(`${baseUrl}/asistente`, {
+        method: 'GET', redirect: 'error', signal,
+        headers: { Accept: 'text/html', 'User-Agent': 'MineLatino-InGame-Assistant/0.1' },
+      });
+    } catch { throw new ApiError(503, 'El asistente oficial no está disponible'); }
+    if (!page.ok) throw new ApiError(502, 'No se pudo iniciar una sesión con el asistente oficial');
+
+    const html = await limitedText(page);
+    const csrf = csrfToken(html);
+    const cookie = cookieHeader(page.headers);
+    if (!csrf || !cookie) throw new ApiError(502, 'La sesión del asistente oficial es inválida');
+
+    let response;
+    try {
+      response = await fetchImpl(`${baseUrl}/api/assistant/message`, {
+        method: 'POST', redirect: 'error', signal,
+        headers: {
+          Accept: 'application/json', 'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest', 'x-csrf-token': csrf,
+          Cookie: cookie, 'User-Agent': 'MineLatino-InGame-Assistant/0.1',
+        },
+        body: JSON.stringify(websiteConversation(messages)),
+      });
+    } catch { throw new ApiError(503, 'El asistente oficial no está disponible'); }
+
+    let payload;
+    try { payload = JSON.parse(await limitedText(response)); } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(502, 'El asistente oficial devolvió una respuesta inválida');
+    }
+    if (!response.ok || payload?.success !== true) {
+      const message = typeof payload?.message === 'string' && payload.message.trim()
+        ? payload.message.trim().slice(0, 500)
+        : response.status === 429 ? 'El asistente está ocupado; inténtalo más tarde' : 'El asistente oficial rechazó la solicitud';
+      throw new ApiError(response.status === 429 ? 429 : 502, message);
+    }
+    const content = typeof payload.answer === 'string' ? payload.answer.trim() : '';
+    if (!content) throw new ApiError(502, 'El asistente oficial devolvió una respuesta vacía');
+    return { content, usage: {} };
+  };
+}
+
+function directProviderComplete({ fetchImpl, timeoutSeconds }) {
   const provider = String(process.env.AI_PROVIDER || '').trim().toLowerCase();
   const apiKey = String(process.env.AI_API_KEY || '').trim();
   const model = String(process.env.AI_MODEL || '').trim();
@@ -45,18 +140,15 @@ export function createAiServiceFromEnv({ store, fetchImpl = fetch, now = Date.no
   const baseUrl = providerBaseUrl(String(process.env.AI_BASE_URL || '').trim(), provider);
   const style = String(process.env.AI_API_STYLE || (provider === 'openai' ? 'responses' : 'chat-completions')).trim().toLowerCase();
   if (!['responses','chat-completions'].includes(style)) throw new Error('AI_API_STYLE no admitido');
-  const timeoutSeconds = integer(process.env.AI_REQUEST_TIMEOUT_SECONDS, 60, 5, 120);
-  const complete = async (messages, clientSignal) => {
+  return async (messages, clientSignal) => {
     let response;
     try {
-      const timeoutSignal = AbortSignal.timeout(timeoutSeconds * 1000);
       const endpoint = `${baseUrl}/${style === 'responses' ? 'responses' : 'chat/completions'}`;
       const requestBody = style === 'responses'
         ? { model, input: messages.map(({ role, content }) => ({ role, content: [{ type: 'input_text', text: content }] })) }
         : { model, messages: messages.map(({ role, content }) => ({ role, content })) };
       response = await fetchImpl(endpoint, {
-        method: 'POST', redirect: 'error',
-        signal: clientSignal ? AbortSignal.any([clientSignal, timeoutSignal]) : timeoutSignal,
+        method: 'POST', redirect: 'error', signal: combineSignal(clientSignal, timeoutSeconds),
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
@@ -70,6 +162,23 @@ export function createAiServiceFromEnv({ store, fetchImpl = fetch, now = Date.no
       outputTokens: integer(style === 'responses' ? payload?.usage?.output_tokens : payload?.usage?.completion_tokens, 0, 0, Number.MAX_SAFE_INTEGER),
     } };
   };
+}
+
+export function createAiServiceFromEnv({ store, fetchImpl = fetch, now = Date.now } = {}) {
+  const source = String(process.env.AI_SOURCE || 'minelatino-web').trim().toLowerCase();
+  const timeoutSeconds = integer(process.env.AI_REQUEST_TIMEOUT_SECONDS, 60, 5, 120);
+  let complete;
+  if (source === 'minelatino-web') {
+    complete = officialWebsiteComplete({
+      baseUrl: assistantBaseUrl(String(process.env.MINELATINO_ASSISTANT_URL || '').trim()),
+      fetchImpl, timeoutSeconds,
+    });
+  } else if (source === 'direct') {
+    complete = directProviderComplete({ fetchImpl, timeoutSeconds });
+    if (!complete) return undefined;
+  } else {
+    throw new Error('AI_SOURCE no admitido');
+  }
   return new AiService({ store, complete, now,
     maxMessageChars: integer(process.env.AI_MAX_MESSAGE_CHARS, 4000, 256, 8000),
     maxContextMessages: integer(process.env.AI_MAX_CONTEXT_MESSAGES, 30, 2, 60),
@@ -112,10 +221,9 @@ export class AiService {
       requireThat(!previous, 'La solicitud ya está en curso', 409);
       this.store.beginAiRequest(accountId, input.requestId, conversationId, this.now());
       const context = this.store.aiContext(accountId, conversationId, this.maxContextMessages - 1);
-      const result = await this.complete([{ role: 'system', content: DEFAULT_SYSTEM_PROMPT }, ...context,
-        { role: 'user', content: message }], signal);
+      const result = await this.complete([...context, { role: 'user', content: message }], signal);
       requireThat(result && typeof result.content === 'string' && result.content.trim().length > 0,
-        'El proveedor de IA devolvió una respuesta vacía', 502);
+        'El asistente oficial devolvió una respuesta vacía', 502);
       const content = result.content.trim().slice(0, 16_000);
       return this.store.completeAiRequest(accountId, input.requestId, conversationId, message, content,
         result.usage || {}, this.now());
