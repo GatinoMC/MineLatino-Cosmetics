@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'com.minelatino.cosmetics'
-version = '0.1.0-alpha.48'
+version = '0.1.0-alpha.49'
 
 def mcVersion = project.findProperty('mcVersion') ?: '1.21.4'
 def targetJavaVersion = mcVersion == '26.2' ? 25 : 21

@@ -84,12 +84,18 @@ public final class PauseMenu {
             int x = old.getX(), y = old.getY(), w = old.getWidth(), h = old.getHeight();
             Component label = old.getMessage();
             old.setX(-0x4000);  // move vanilla button off-screen so it can't be clicked
-            add.accept(Button.builder(label, btn -> {
+            Runnable action = () -> {
                 minecraft.gui.setScreen(new ConfirmLinkScreen(confirmed -> {
                     if (confirmed) Util.getPlatform().openUri(uri);
                     minecraft.gui.setScreen(screen);
                 }, uri.toString(), true));
-            }).bounds(x, y, w, h).build());
+            };
+            PauseMenuIconButton.Icon icon = compactIcon(label.getString(), url);
+            if (icon != null) {
+                add.accept(new PauseMenuIconButton(x, y, w, h, label.getString(), icon, action));
+            } else {
+                add.accept(Button.builder(label, button -> action.run()).bounds(x, y, w, h).build());
+            }
         }
         int index = 0;
         int count = config.buttons().size();
@@ -119,8 +125,12 @@ public final class PauseMenu {
     }
 
     private static PauseMenuIconButton.Icon compactIcon(MenuConfig.Entry entry) {
-        String label = entry.label().toLowerCase(java.util.Locale.ROOT);
-        String url = entry.url() == null ? "" : entry.url().toLowerCase(java.util.Locale.ROOT);
+        return compactIcon(entry.label(), entry.url());
+    }
+
+    private static PauseMenuIconButton.Icon compactIcon(String rawLabel, String rawUrl) {
+        String label = rawLabel.toLowerCase(java.util.Locale.ROOT);
+        String url = rawUrl == null ? "" : rawUrl.toLowerCase(java.util.Locale.ROOT);
         if (label.contains("tienda") || label.contains("shop") || label.contains("store")) {
             return PauseMenuIconButton.Icon.CART;
         }

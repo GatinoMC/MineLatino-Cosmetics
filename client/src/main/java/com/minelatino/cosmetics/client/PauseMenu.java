@@ -63,7 +63,7 @@ public final class PauseMenu {
         }
         if (!config.enabled()) return;
         // Phase 1: rename labels and collect buttons that need URL overrides
-        record PendingReplace(Button button, String key) {}
+        record PendingReplace(Button button, String key, int x, int y, int width, int height) {}
         List<PendingReplace> toReplace = new ArrayList<>();
         for (var child : screen.children()) {
             if (child instanceof Button button && button.getMessage().getContents() instanceof TranslatableContents contents) {
@@ -71,18 +71,24 @@ public final class PauseMenu {
                 if (key.equals("menu.playerReporting")) continue;
                 String replacement = config.labels().get(key);
                 if (replacement != null) button.setMessage(Component.literal(replacement));
-                if (config.vanillaUrls().containsKey(key)) toReplace.add(new PendingReplace(button, key));
+                if (config.vanillaUrls().containsKey(key)) {
+                    toReplace.add(new PendingReplace(button, key, button.getX(), button.getY(), button.getWidth(), button.getHeight()));
+                }
             }
         }
-        // Phase 2: for buttons with URL overrides, move vanilla button off-screen and add a replacement
+        // Hide every overridden vanilla button before measuring free space. This
+        // keeps the pending Discord/Tienda pair from blocking one another while
+        // still treating buttons injected by Mod Menu/Forge as occupied.
+        for (var pending : toReplace) pending.button().setX(-0x4000);
+        // Phase 2: add URL replacements at their original position when free,
+        // or at the first unobstructed row when another mod already owns it.
         for (var pending : toReplace) {
-            Button old = pending.button();
             String url = config.vanillaUrls().get(pending.key());
             if (url == null) continue;
             var uri = MenuPolicy.website(url);
-            int x = old.getX(), y = old.getY(), w = old.getWidth(), h = old.getHeight();
-            Component label = old.getMessage();
-            old.setX(-0x4000);  // move vanilla button off-screen so it can't be clicked
+            int x = pending.x(), w = pending.width(), h = pending.height();
+            int y = findFreeY(screen, x, pending.y(), w, h);
+            Component label = pending.button().getMessage();
             add.accept(Button.builder(label, btn -> {
                 minecraft.setScreen(new ConfirmLinkScreen(confirmed -> {
                     if (confirmed) Util.getPlatform().openUri(uri);
@@ -107,5 +113,25 @@ public final class PauseMenu {
                 }
             }).bounds(startX + index++ * (buttonWidth + 4), 6, buttonWidth, 20).build());
         }
+    }
+
+    private static int findFreeY(Screen screen, int x, int preferredY, int width, int height) {
+        if (!isOccupied(screen, x, preferredY, width, height)) return preferredY;
+        int maxY = Math.max(30, screen.height - height - 4);
+        for (int y = 30; y <= maxY; y += height + 4) {
+            if (!isOccupied(screen, x, y, width, height)) return y;
+        }
+        return preferredY;
+    }
+
+    private static boolean isOccupied(Screen screen, int x, int y, int width, int height) {
+        for (var child : screen.children()) {
+            if (!(child instanceof AbstractWidget widget) || !widget.visible || widget.getX() < -1000) continue;
+            if (x < widget.getX() + widget.getWidth() + 2
+                    && x + width + 2 > widget.getX()
+                    && y < widget.getY() + widget.getHeight() + 2
+                    && y + height + 2 > widget.getY()) return true;
+        }
+        return false;
     }
 }
