@@ -111,6 +111,14 @@ test('admin assignments use MineLatino accounts instead of legacy Minecraft UUID
   assert(!html.includes('id="grant-uuid"'));
 });
 
+test('account table actions use CSP-compatible delegated events', () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const rowBuilder = html.match(/async function loadPlayerAccounts\(\).*$/m)?.[0] ?? '';
+  assert(rowBuilder.includes('data-account-action="delete"'));
+  assert(!rowBuilder.includes('onclick='));
+  assert(html.includes("$('accounts-body').addEventListener('click'"));
+});
+
 test('editor converts API transforms exactly like the Minecraft renderer', () => {
   const api = editor();
   const source = { translation: [8, 16, -4], rotation: [15, 30, -45], scale: [2, 1.5, .75] };
