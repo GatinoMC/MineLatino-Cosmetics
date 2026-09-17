@@ -116,7 +116,7 @@ public final class HudEditorScreen extends Screen {
     }
 
     @Override public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-        graphics.fill(0, 0, width, height, 0xE6101218);
+        // Keep the game visible so players can preview the final HUD placement.
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
