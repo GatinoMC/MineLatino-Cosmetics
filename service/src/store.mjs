@@ -84,7 +84,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS cosmetic_transforms(cosmetic_id TEXT NOT NULL REFERENCES cosmetics(id), slot TEXT NOT NULL CHECK(slot IN ('cape','hat','wings','backpack','pet','skin')), translation_x REAL DEFAULT 0, translation_y REAL DEFAULT 0, translation_z REAL DEFAULT 0, rotation_x REAL DEFAULT 0, rotation_y REAL DEFAULT 0, rotation_z REAL DEFAULT 0, scale_x REAL DEFAULT 1, scale_y REAL DEFAULT 1, scale_z REAL DEFAULT 1, updated_at INTEGER, PRIMARY KEY(cosmetic_id, slot));
       CREATE TABLE IF NOT EXISTS pet_animations(cosmetic_id TEXT PRIMARY KEY REFERENCES cosmetics(id), animation_name TEXT NOT NULL, file_path TEXT, sha256 TEXT, file_size INTEGER, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS player_accounts(account_id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, nick TEXT NOT NULL, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','deleted')), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
-      CREATE TABLE IF NOT EXISTS account_sessions(token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, scope TEXT NOT NULL CHECK(scope IN ('account','game')), expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS account_sessions(token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, scope TEXT NOT NULL CHECK(scope IN ('account','game','afk')), expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL, parent_token_hash TEXT REFERENCES account_sessions(token_hash) ON DELETE CASCADE);
       CREATE TABLE IF NOT EXISTS password_reset_tokens(token_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, consumed_at INTEGER);
       CREATE TABLE IF NOT EXISTS account_entitlements(account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, cosmetic_id TEXT NOT NULL REFERENCES cosmetics(id), active INTEGER NOT NULL CHECK(active IN (0,1)), PRIMARY KEY(account_id,cosmetic_id));
       CREATE TABLE IF NOT EXISTS account_equipment(account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, slot TEXT NOT NULL, cosmetic_id TEXT NOT NULL, PRIMARY KEY(account_id,slot), FOREIGN KEY(account_id,cosmetic_id) REFERENCES account_entitlements(account_id,cosmetic_id));
@@ -126,6 +126,7 @@ export class Store {
     this.migrateCosmeticSlots();
     this.migrateCosmeticTransforms();
     this.migrateLegacyAccountEntitlements();
+    this.migrateAccountSessions();
     this.retireLegacySkins();
     this.repairInvalidPublishedCosmetics();
   }
@@ -444,6 +445,30 @@ export class Store {
     this.audit(actor, 'player-account.delete', { accountId });
     return result;
   }
+  migrateAccountSessions() {
+    const columns = this.db.prepare("PRAGMA table_info(account_sessions)").all().map(column => column.name);
+    const schema = this.db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name='account_sessions'").get().sql;
+    if (columns.includes('parent_token_hash') && schema.includes("'afk'")) {
+      if (this.db.prepare('PRAGMA user_version').get().user_version < 10) this.db.exec('PRAGMA user_version=10');
+      return;
+    }
+    this.db.exec('PRAGMA foreign_keys=OFF');
+    try {
+      this.transaction(() => {
+        this.db.exec(`CREATE TABLE account_sessions_v10(token_hash TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE,
+          scope TEXT NOT NULL CHECK(scope IN ('account','game','afk')), expires_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL,
+          parent_token_hash TEXT REFERENCES account_sessions_v10(token_hash) ON DELETE CASCADE);
+          INSERT INTO account_sessions_v10(token_hash,account_id,scope,expires_at,created_at,last_used_at)
+            SELECT token_hash,account_id,scope,expires_at,created_at,last_used_at FROM account_sessions;
+          DROP TABLE account_sessions;
+          ALTER TABLE account_sessions_v10 RENAME TO account_sessions;
+          PRAGMA user_version=10;`);
+        requireThat(this.db.prepare('PRAGMA foreign_key_check').all().length === 0, 'Migración de sesiones: referencias inválidas', 500);
+      });
+    } finally { this.db.exec('PRAGMA foreign_keys=ON'); }
+  }
 
   purgePlayerAccount(accountId, actor) {
     const row = this.accountById(accountId, true);
@@ -474,9 +499,11 @@ export class Store {
     });
   }
 
-  createAccountSession(tokenHash, accountId, scope, expiresAt, now) {
+  createAccountSession(tokenHash, accountId, scope, expiresAt, now, parentTokenHash = null) {
     this.db.prepare('DELETE FROM account_sessions WHERE expires_at<=?').run(now);
-    this.db.prepare('INSERT INTO account_sessions VALUES(?,?,?,?,?,?)').run(tokenHash, accountId, scope, expiresAt, now, now);
+    this.db.prepare(`INSERT INTO account_sessions
+      (token_hash,account_id,scope,expires_at,created_at,last_used_at,parent_token_hash)
+      VALUES(?,?,?,?,?,?,?)`).run(tokenHash, accountId, scope, expiresAt, now, now, parentTokenHash);
   }
   accountSession(tokenHash) { return this.db.prepare('SELECT * FROM account_sessions WHERE token_hash=?').get(tokenHash); }
   touchAccountSession(tokenHash, now) { this.db.prepare('UPDATE account_sessions SET last_used_at=? WHERE token_hash=?').run(now, tokenHash); }

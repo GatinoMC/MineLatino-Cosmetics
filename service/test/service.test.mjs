@@ -67,7 +67,7 @@ test('v4 slot migration preserves ownership and equipment and is idempotent', t 
   try {
     assert.equal(store.cosmetic('pet').slot, 'PET');
     assert.equal(store.appearance(OWNER)[0].cosmeticId, 'cape');
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
     assert.equal(store.db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   } finally { store.close(); }
 });
@@ -107,7 +107,7 @@ test('legacy head/backpack transforms migrate to each cosmetic catalog type', t 
   try {
     assert.deepEqual(store.getTransforms('pet').pet.translation, [1, 2, 3]);
     assert.deepEqual(store.getTransforms('cape').cape.scale, [2, 2, 2]);
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
   } finally { store.close(); }
 });
 function fixture(t, options = {}) {
@@ -173,7 +173,7 @@ test('v9 migrates legacy grants accidentally addressed to a MineLatino account I
   store.db.exec('PRAGMA user_version=8'); store.close();
   store = new Store(path);
   assert.equal(store.accountWardrobe(OWNER).owned[0].id, 'cape');
-  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 9);
+  assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 10);
   store.accountEntitlement({ accountId: OWNER, cosmeticId: 'cape' }, false, 'admin');
   store.close(); store = new Store(path);
   assert.equal(store.accountWardrobe(OWNER).owned.length, 0, 'migration must not regrant after an account-native revoke');
@@ -960,7 +960,7 @@ test('AI assistant exchanges a game session for a short scoped token and stores 
   const game = await request('/v1/account/game-token', { method: 'POST', token: registered.data.token, data: {} });
   const assistant = await request('/v1/ai/token', { method: 'POST', token: game.data.token, data: {} });
   assert.equal(assistant.status, 201);
-  assert.deepEqual(assistant.data.scopes, ['ai:chat', 'afk:assistant']);
+  assert.deepEqual(assistant.data.scopes, ['ai:chat']);
   assert.equal((await request('/v1/ai/chat', { method: 'POST', token: game.data.token, data: {
     requestId: crypto.randomUUID(), conversationId: null, message: 'Hola',
   } })).status, 401, 'a broad game token must not call the AI route directly');
@@ -1060,13 +1060,19 @@ test('AI assistant uses the official MineLatino website chat by default', async 
 test('AFK Farm time is assigned by admin, metered by server time, and blocks at zero', async t => {
   let clock = 1_800_000_000_000;
   const now = () => clock;
-  const { request } = fixture(t, { now });
+  const { store, request } = fixture(t, { now });
   const registered = await request('/v1/account/register', { method: 'POST', data: {
     email: 'afk-time@example.com', password: 'correct-horse-afk', nick: 'AfkTimer',
   } });
   const accountId = registered.data.account.accountId;
   const emptyToken = await request('/v1/afk/token', { method: 'POST', token: registered.data.token, data: {} });
   assert.equal(emptyToken.status, 201);
+  assert.equal(emptyToken.data.scope, 'afk');
+  assert.deepEqual(emptyToken.data.scopes, ['afk:usage']);
+  assert.equal(new AccountAuth({ store, now }).authenticateAfk(`Bearer ${emptyToken.data.token}`).accountId, accountId,
+    'the AFK capability must survive a backend process restart');
+  assert.equal((await request('/v1/account/me', { token: emptyToken.data.token })).status, 403,
+    'the AFK capability must not authorize account routes');
   assert.equal((await request('/v1/afk/status', { token: emptyToken.data.token })).data.remainingSeconds, 0);
   assert.equal((await request('/v1/afk/sessions', { method: 'POST', token: emptyToken.data.token, data: {} })).status, 402);
 
@@ -1089,4 +1095,7 @@ test('AFK Farm time is assigned by admin, metered by server time, and blocks at 
   assert.equal(exhausted.data.remainingSeconds, 0);
   assert.equal(exhausted.data.exhausted, true);
   assert.equal((await request('/v1/afk/sessions', { method: 'POST', token: emptyToken.data.token, data: {} })).status, 402);
+  assert.equal((await request('/v1/account/logout', { method: 'POST', token: registered.data.token, data: {} })).status, 200);
+  assert.equal((await request('/v1/afk/status', { token: emptyToken.data.token })).status, 401,
+    'revoking the parent session must revoke its AFK capability');
 });

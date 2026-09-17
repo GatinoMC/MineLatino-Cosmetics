@@ -5,6 +5,7 @@ import { ApiError, requireThat } from './store.mjs';
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 const GAME_TTL = 24 * 60 * 60 * 1000;
 const ASSISTANT_TTL = 10 * 60 * 1000;
+const AFK_TTL = 15 * 60 * 1000;
 const RESET_TTL = 15 * 60 * 1000;
 const tokenHash = token => createHash('sha256').update(token).digest('hex');
 const RESET_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -103,9 +104,9 @@ export class AccountAuth {
     requireThat(row && await this.verifyPassword(row, value), 'La contraseña actual es incorrecta', 401);
   }
 
-  issue(accountId, scope, ttl = GAME_TTL) {
+  issue(accountId, scope, ttl = GAME_TTL, parentTokenHash = null) {
     const token = randomBytes(32).toString('base64url'), expiresAt = this.now() + ttl;
-    this.store.createAccountSession(tokenHash(token), accountId, scope, expiresAt, this.now());
+    this.store.createAccountSession(tokenHash(token), accountId, scope, expiresAt, this.now(), parentTokenHash);
     return { token, tokenType: 'Bearer', scope, expiresAt };
   }
 
@@ -114,6 +115,10 @@ export class AccountAuth {
     const session = this.store.accountSession(tokenHash(header.slice(7)));
     requireThat(session && session.expires_at > this.now(), 'Sesión inválida o caducada', 401);
     requireThat(allowedScopes.includes(session.scope), 'Permiso de sesión insuficiente', 403);
+    if (session.parent_token_hash) {
+      const parent = this.store.accountSession(session.parent_token_hash);
+      requireThat(parent && parent.account_id === session.account_id && parent.expires_at > this.now(), 'Sesión vinculada revocada', 401);
+    }
     const account = this.store.accountById(session.account_id, true);
     requireThat(account?.status === 'active', 'La cuenta no está activa', 403);
     this.store.touchAccountSession(session.token_hash, this.now());
@@ -136,9 +141,28 @@ export class AccountAuth {
     this.pruneAssistantSessions();
     this.assistantSessions.set(tokenHash(token), {
       accountId: account.account_id, parentTokenHash: session.token_hash, expiresAt,
-      scopes: ['ai:chat', 'afk:assistant'],
+      scopes: ['ai:chat'],
     });
-    return { token, tokenType: 'Bearer', scopes: ['ai:chat', 'afk:assistant'], expiresAt };
+    return { token, tokenType: 'Bearer', scopes: ['ai:chat'], expiresAt };
+  }
+
+  afkToken(header) {
+    const { session, account } = this.authenticate(header, ['account', 'game']);
+    const issued = this.issue(account.account_id, 'afk', AFK_TTL, session.token_hash);
+    return { ...issued, scopes: ['afk:usage'] };
+  }
+
+  authenticateAfk(header) {
+    try {
+      const { session, account } = this.authenticate(header, ['afk']);
+      return { accountId: account.account_id, expiresAt: session.expires_at };
+    } catch (error) {
+      // During the rolling update, already-running alpha.10 clients can finish
+      // their leases with the former in-memory capability. New clients always
+      // receive the persistent, single-purpose AFK session above.
+      if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      return this.authenticateAssistant(header, 'afk:assistant');
+    }
   }
 
   authenticateAssistant(header, requiredScope = 'ai:chat') {

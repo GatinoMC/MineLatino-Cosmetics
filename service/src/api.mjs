@@ -119,8 +119,8 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       // ── AFK Farm metered usage (short-lived restricted bearer) ───────
       if (path.startsWith('/v1/afk/')) {
         requireThat(accountAuth && afkUsage, 'Control de AFK Farm no disponible', 503);
-        if (method === 'POST' && path === '/v1/afk/token') return json(accountAuth.assistantToken(authorization), 201);
-        const capability = accountAuth.authenticateAssistant(authorization, 'afk:assistant');
+        if (method === 'POST' && path === '/v1/afk/token') return json(accountAuth.afkToken(authorization), 201);
+        const capability = accountAuth.authenticateAfk(authorization);
         if (method === 'GET' && path === '/v1/afk/status') return json(afkUsage.status(capability.accountId));
         if (method === 'POST' && path === '/v1/afk/sessions') return json(afkUsage.start(capability.accountId), 201);
         const afkSessionMatch = path.match(/^\/v1\/afk\/sessions\/([0-9a-f-]{36})\/(heartbeat|stop)$/i);
