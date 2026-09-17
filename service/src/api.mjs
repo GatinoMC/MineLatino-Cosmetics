@@ -416,7 +416,7 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
           }, actor) });
         }
         if (playerAccountMatch && method === 'DELETE') {
-          return json({ account: store.deletePlayerAccount(playerAccountMatch[1], actor) });
+          return json({ account: store.purgePlayerAccount(playerAccountMatch[1], actor), permanentlyDeleted: true });
         }
         const playerPasswordResetMatch = path.match(/^\/v1\/admin\/player-accounts\/([a-f0-9]{32})\/password-reset$/);
         if (playerPasswordResetMatch && method === 'POST') {

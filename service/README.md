@@ -49,6 +49,7 @@ administrativos, permisos de archivos, copias verificadas y operación multiinst
 | POST `/v1/account/password/reset` | Consumir el código y definir una contraseña nueva |
 | PUT `/v1/account/password` | Cambiarla con sesión y contraseña actual |
 | POST `/v1/admin/player-accounts/<id>/password-reset` | Generar un código de soporte de un solo uso |
+| DELETE `/v1/admin/player-accounts/<id>` | Eliminar permanentemente una cuenta y liberar su correo/nick |
 | POST `/v1/ai/token` | Canjear una sesión vinculada por un token IA de 10 minutos |
 | GET `/v1/ai/status` | Consultar disponibilidad y límites con token IA |
 | POST `/v1/ai/chat` | Enviar un mensaje idempotente en una conversación de la cuenta |

@@ -204,8 +204,8 @@ test('game token equips and publishes account cosmetics for offline identities',
 });
 
 
-test('player accounts can update themselves and administrators can suspend or delete them', async t => {
-  const { request } = fixture(t);
+test('player accounts can update themselves and administrators can suspend or permanently delete them', async t => {
+  const { store, request } = fixture(t);
   const registered = await request('/v1/account/register', { method: 'POST', data: {
     email: 'manage@example.com', password: 'correct-horse-4', nick: 'ManageMe',
   }});
@@ -222,7 +222,12 @@ test('player accounts can update themselves and administrators can suspend or de
   assert.equal(suspended.data.account.status, 'suspended');
   assert.equal((await request('/v1/account/me', { token: registered.data.token })).status, 401);
   const deleted = await request(`/v1/admin/player-accounts/${accountId}`, { method: 'DELETE', token: ADMIN });
-  assert.equal(deleted.data.account.status, 'deleted');
+  assert.equal(deleted.data.account.status, 'deleted'); assert.equal(deleted.data.permanentlyDeleted, true);
+  assert.equal(store.accountById(accountId, true), undefined);
+  const recreated = await request('/v1/account/register', { method: 'POST', data: {
+    email: 'manage@example.com', password: 'new-correct-horse-4', nick: 'EditedNick',
+  }});
+  assert.equal(recreated.status, 201);
 });
 
 test('password recovery uses an expiring one-time code without revealing unknown emails', async t => {

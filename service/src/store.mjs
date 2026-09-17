@@ -445,6 +445,35 @@ export class Store {
     return result;
   }
 
+  purgePlayerAccount(accountId, actor) {
+    const row = this.accountById(accountId, true);
+    requireThat(row, 'Cuenta no encontrada', 404);
+    const deletedAt = Date.now();
+    const account = { ...this.publicPlayerAccount(row), status: 'deleted', deletedAt };
+    const fingerprint = createHash('sha256').update(accountId).digest('hex').slice(0, 16);
+    return this.transaction(() => {
+      let deletedOrders = 0;
+      const hasOrders = !!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='cosmetic_orders'").get();
+      if (hasOrders) {
+        const reservations = this.db.prepare(`SELECT cosmetic_id,COUNT(*) count FROM cosmetic_orders
+          WHERE owner_type='account' AND owner=? AND status='pending' AND stock_reserved=1 GROUP BY cosmetic_id`).all(accountId);
+        for (const reservation of reservations) {
+          this.db.prepare(`UPDATE cosmetic_products SET stock_remaining=stock_remaining+?
+            WHERE cosmetic_id=? AND stock_mode='limited'`).run(Number(reservation.count), reservation.cosmetic_id);
+        }
+        deletedOrders = Number(this.db.prepare("DELETE FROM cosmetic_orders WHERE owner_type='account' AND owner=?").run(accountId).changes);
+      }
+      // Every account-owned table uses ON DELETE CASCADE. Removing the parent
+      // releases the unique email and nick while revoking all current sessions.
+      this.db.prepare('DELETE FROM player_accounts WHERE account_id=?').run(accountId);
+      // A permanent deletion must not leave the opaque account ID or nick in
+      // historical JSON. Keep only a one-way fingerprint in the new admin event.
+      this.db.prepare("DELETE FROM audit WHERE actor=? OR instr(payload,?)>0").run(`account:${accountId}`, accountId);
+      this.audit(actor, 'player-account.purge', { accountFingerprint: fingerprint, deletedOrders });
+      return account;
+    });
+  }
+
   createAccountSession(tokenHash, accountId, scope, expiresAt, now) {
     this.db.prepare('DELETE FROM account_sessions WHERE expires_at<=?').run(now);
     this.db.prepare('INSERT INTO account_sessions VALUES(?,?,?,?,?,?)').run(tokenHash, accountId, scope, expiresAt, now, now);
