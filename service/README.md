@@ -77,9 +77,9 @@ credenciales, query ni fragmento. La clave continúa exclusivamente en Railway.
 
 El token de cuenta o juego sirve sólo para solicitar una credencial efímera; no puede
 llamar directamente a chat. La credencial resultante usa exclusivamente
-`Authorization: Bearer`, tiene los alcances `ai:chat` y `afk:assistant`, está enlazada
-a la sesión padre y deja de funcionar al cerrar sesiones, suspender/eliminar la cuenta
-o reiniciar el servicio. Conversaciones, mensajes y consumo se almacenan por
+`Authorization: Bearer`, tiene el alcance `ai:chat`, está enlazada a la sesión padre
+y deja de funcionar al cerrar sesiones, suspender/eliminar la cuenta o reiniciar el
+servicio. Conversaciones, mensajes y consumo se almacenan por
 `accountId`; un `requestId` evita cobros y respuestas duplicadas.
 
 ## Tiempo de AFK Farm
@@ -88,7 +88,9 @@ El panel **AFK Farm** permite buscar una cuenta MineLatino, añadir tiempo, esta
 un saldo exacto o dejarlo en cero. Los cambios quedan en la auditoría. Una cuenta nueva
 empieza con cero segundos y no puede iniciar el flujo hasta recibir tiempo.
 
-El mod canjea su sesión vinculada en `POST /v1/afk/token`, consulta el saldo mediante
+El mod canjea su sesión vinculada en `POST /v1/afk/token` por una credencial persistente
+de 15 minutos con alcance exclusivo `afk:usage`. La credencial sobrevive reinicios del
+servicio, se renueva antes de caducar y se revoca junto con su sesión padre. Consulta el saldo mediante
 `GET /v1/afk/status` y abre una sesión exclusiva en `POST /v1/afk/sessions`. Mientras
 la automatización está activa llama al heartbeat cada 20 segundos. El backend calcula
 el tiempo transcurrido con su propio reloj, limita a 60 segundos el cargo de una
