@@ -76,25 +76,23 @@ public final class PauseMenu {
                 }
             }
         }
-        // Hide every overridden vanilla button before measuring free space. This
-        // keeps the pending Discord/Tienda pair from blocking one another while
-        // still treating buttons injected by Mod Menu/Forge as occupied.
+        // Discord and Tienda share a dedicated row below the exit button. Their
+        // original X positions preserve the vanilla two-column alignment.
         for (var pending : toReplace) pending.button().setX(-0x4000);
-        // Phase 2: add URL replacements at their original position when free,
-        // or at the first unobstructed row when another mod already owns it.
+        int linksY = toReplace.isEmpty() ? 0 : findLinksRowY(screen, toReplace.get(0).y());
+        // Phase 2: add both URL replacements on the same row.
         for (var pending : toReplace) {
             String url = config.vanillaUrls().get(pending.key());
             if (url == null) continue;
             var uri = MenuPolicy.website(url);
             int x = pending.x(), w = pending.width(), h = pending.height();
-            int y = findFreeY(screen, x, pending.y(), w, h);
             Component label = pending.button().getMessage();
             add.accept(Button.builder(label, btn -> {
                 minecraft.setScreen(new ConfirmLinkScreen(confirmed -> {
                     if (confirmed) Util.getPlatform().openUri(uri);
                     minecraft.setScreen(screen);
                 }, uri.toString(), true));
-            }).bounds(x, y, w, h).build());
+            }).bounds(x, linksY, w, h).build());
         }
         int index = 0;
         int count = config.buttons().size();
@@ -115,23 +113,14 @@ public final class PauseMenu {
         }
     }
 
-    private static int findFreeY(Screen screen, int x, int preferredY, int width, int height) {
-        if (!isOccupied(screen, x, preferredY, width, height)) return preferredY;
-        int maxY = Math.max(30, screen.height - height - 4);
-        for (int y = 30; y <= maxY; y += height + 4) {
-            if (!isOccupied(screen, x, y, width, height)) return y;
-        }
-        return preferredY;
-    }
-
-    private static boolean isOccupied(Screen screen, int x, int y, int width, int height) {
+    private static int findLinksRowY(Screen screen, int fallbackY) {
         for (var child : screen.children()) {
-            if (!(child instanceof AbstractWidget widget) || !widget.visible || widget.getX() < -1000) continue;
-            if (x < widget.getX() + widget.getWidth() + 2
-                    && x + width + 2 > widget.getX()
-                    && y < widget.getY() + widget.getHeight() + 2
-                    && y + height + 2 > widget.getY()) return true;
+            if (child instanceof Button button
+                    && button.getMessage().getContents() instanceof TranslatableContents contents
+                    && (contents.getKey().equals("menu.disconnect") || contents.getKey().equals("menu.returnToMenu"))) {
+                return button.getY() + button.getHeight() + 4;
+            }
         }
-        return false;
+        return fallbackY;
     }
 }
