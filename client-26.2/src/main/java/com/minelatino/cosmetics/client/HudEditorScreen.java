@@ -9,24 +9,30 @@ import net.minecraft.network.chat.Component;
 public final class HudEditorScreen extends Screen {
     private final Screen parent;
     private final String selectedId;
+    private final boolean panelVisible;
     private String dragging;
     private double dragOffsetX;
     private double dragOffsetY;
 
     public HudEditorScreen(Screen parent) {
-        this(parent, null);
+        this(parent, null, true);
     }
 
-    private HudEditorScreen(Screen parent, String selectedId) {
+    private HudEditorScreen(Screen parent, String selectedId, boolean panelVisible) {
         super(Component.literal("Personalizar HUD"));
         this.parent = parent;
         this.selectedId = selectedId;
+        this.panelVisible = panelVisible;
     }
 
     @Override protected void init() {
         HudConfig config = config();
         int panelWidth = Math.min(246, Math.max(120, width - 8));
-        int x = Math.max(4, width - panelWidth - 4) + 4;
+        int panelX = Math.max(4, width - panelWidth - 4);
+        addRenderableWidget(new HudButton(width - 24, 6, 20, 18,
+                panelVisible ? ">" : "<", this::togglePanel, () -> panelVisible));
+        if (!panelVisible) return;
+        int x = panelX + 4;
         int contentWidth = panelWidth - 8;
         int bottomY = Math.max(48, height - 27);
         if (selectedId != null && HudConfig.ORDER.contains(selectedId)) {
@@ -119,12 +125,14 @@ public final class HudEditorScreen extends Screen {
         HudOverlay.render(graphics, true);
         int panelWidth = Math.min(246, Math.max(120, width - 8));
         int panelX = Math.max(4, width - panelWidth - 4);
-        HudButton.panel(graphics, panelX, 4, panelWidth, Math.max(1, height - 8), 0xFF31515D, 0xE611171D);
+        if (panelVisible) HudButton.panel(graphics, panelX, 4, panelWidth, Math.max(1, height - 8), 0xFF31515D, 0xE611171D);
         super.extractRenderState(graphics, mouseX, mouseY, delta);
-        String heading = selectedId == null ? "Personalizar HUD" : "Editar · " + name(selectedId);
-        graphics.centeredText(font, heading, panelX + panelWidth / 2, 11, 0xFFA8F3FF);
-        if (width - panelWidth > 170) graphics.text(font,
-                "Arrastra los módulos · selecciona uno para editar su aspecto", 8, height - 14, 0xFFA8B2BC, false);
+        if (panelVisible) {
+            String heading = selectedId == null ? "Personalizar HUD" : "Editar · " + name(selectedId);
+            graphics.centeredText(font, heading, panelX + panelWidth / 2, 11, 0xFFA8F3FF);
+            if (width - panelWidth > 170) graphics.text(font,
+                    "Arrastra los módulos · selecciona uno para editar su aspecto", 8, height - 14, 0xFFA8B2BC, false);
+        }
     }
 
     @Override public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
@@ -167,7 +175,9 @@ public final class HudEditorScreen extends Screen {
         return HudConfig.get(minecraft.gameDirectory.toPath());
     }
 
-    private void reopen(String id) { minecraft.gui.setScreen(new HudEditorScreen(parent, id)); }
+    private void reopen(String id) { minecraft.gui.setScreen(new HudEditorScreen(parent, id, panelVisible)); }
+
+    private void togglePanel() { minecraft.gui.setScreen(new HudEditorScreen(parent, selectedId, !panelVisible)); }
 
     private static String name(String id) {
         return switch (id) {
