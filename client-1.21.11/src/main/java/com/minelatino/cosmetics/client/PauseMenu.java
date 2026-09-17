@@ -65,9 +65,11 @@ public final class PauseMenu {
         // Phase 1: rename labels and collect buttons that need URL overrides
         record PendingReplace(Button button, String key, int x, int y, int width, int height) {}
         List<PendingReplace> toReplace = new ArrayList<>();
+        Button exitButton = null;
         for (var child : screen.children()) {
             if (child instanceof Button button && button.getMessage().getContents() instanceof TranslatableContents contents) {
                 String key = contents.getKey();
+                if (key.equals("menu.disconnect") || key.equals("menu.returnToMenu")) exitButton = button;
                 if (key.equals("menu.playerReporting")) continue;
                 String replacement = config.labels().get(key);
                 if (replacement != null) button.setMessage(Component.literal(replacement));
@@ -77,22 +79,24 @@ public final class PauseMenu {
             }
         }
         // Discord and Tienda share a dedicated row below the exit button. Their
-        // original X positions preserve the vanilla two-column alignment.
+        // positions are derived from that full-width button so both links still
+        // exist when Mod Menu has replaced one of their vanilla source buttons.
         for (var pending : toReplace) pending.button().setX(-0x4000);
-        int linksY = toReplace.isEmpty() ? 0 : findLinksRowY(screen, toReplace.get(0).y());
-        // Phase 2: add both URL replacements on the same row.
-        for (var pending : toReplace) {
-            String url = config.vanillaUrls().get(pending.key());
-            if (url == null) continue;
-            var uri = MenuPolicy.website(url);
-            int x = pending.x(), w = pending.width(), h = pending.height();
-            Component label = pending.button().getMessage();
-            add.accept(Button.builder(label, btn -> {
-                minecraft.setScreen(new ConfirmLinkScreen(confirmed -> {
-                    if (confirmed) Util.getPlatform().openUri(uri);
-                    minecraft.setScreen(screen);
-                }, uri.toString(), true));
-            }).bounds(x, linksY, w, h).build());
+        if (exitButton != null) {
+            int gap = 4;
+            int linkWidth = (exitButton.getWidth() - gap) / 2;
+            int linksY = exitButton.getY() + exitButton.getHeight() + gap;
+            addUrlButton(minecraft, screen, add, config, "menu.sendFeedback",
+                    exitButton.getX(), linksY, linkWidth, exitButton.getHeight());
+            addUrlButton(minecraft, screen, add, config, "menu.reportBugs",
+                    exitButton.getX() + linkWidth + gap, linksY, linkWidth, exitButton.getHeight());
+        } else {
+            // Non-standard pause screens without an exit button retain the old
+            // source positions rather than dropping their configured links.
+            for (var pending : toReplace) {
+                addUrlButton(minecraft, screen, add, config, pending.key(),
+                        pending.x(), pending.y(), pending.width(), pending.height());
+            }
         }
         int index = 0;
         int count = config.buttons().size();
@@ -113,14 +117,18 @@ public final class PauseMenu {
         }
     }
 
-    private static int findLinksRowY(Screen screen, int fallbackY) {
-        for (var child : screen.children()) {
-            if (child instanceof Button button
-                    && button.getMessage().getContents() instanceof TranslatableContents contents
-                    && (contents.getKey().equals("menu.disconnect") || contents.getKey().equals("menu.returnToMenu"))) {
-                return button.getY() + button.getHeight() + 4;
-            }
-        }
-        return fallbackY;
+    private static void addUrlButton(Minecraft minecraft, Screen screen, Consumer<AbstractWidget> add,
+                                     MenuConfig config, String key, int x, int y, int width, int height) {
+        String url = config.vanillaUrls().get(key);
+        if (url == null) return;
+        String replacement = config.labels().get(key);
+        Component label = replacement == null ? Component.translatable(key) : Component.literal(replacement);
+        var uri = MenuPolicy.website(url);
+        add.accept(Button.builder(label, button -> {
+            minecraft.setScreen(new ConfirmLinkScreen(confirmed -> {
+                if (confirmed) Util.getPlatform().openUri(uri);
+                minecraft.setScreen(screen);
+            }, uri.toString(), true));
+        }).bounds(x, y, width, height).build());
     }
 }
