@@ -7,6 +7,6 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/store.mjs && node --check src/auth.mjs && node --check src/accountAuth.mjs && node --check src/recovery.mjs && node --check src/adminAuth.mjs && node --check src/commerce.mjs && node --check src/bbmodel.mjs && node --check src/ai.mjs && node --check src/afkUsage.mjs && node --check src/api.mjs && node --check src/http.mjs && node --check src/server.mjs"
+    "check": "node --check src/store.mjs && node --check src/auth.mjs && node --check src/accountAuth.mjs && node --check src/recovery.mjs && node --check src/adminAuth.mjs && node --check src/commerce.mjs && node --check src/bbmodel.mjs && node --check src/competitionServers.mjs && node --check src/ai.mjs && node --check src/afkUsage.mjs && node --check src/api.mjs && node --check src/http.mjs && node --check src/server.mjs"
   }
 }

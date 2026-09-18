@@ -1,9 +1,10 @@
 import { ApiError, requireThat, uuid, cosmeticId } from './store.mjs';
 import { PlayerAuth } from './auth.mjs';
-import { createHash, randomBytes, pbkdf2Sync } from 'node:crypto';
+import { createHash, createHmac, randomBytes, pbkdf2Sync } from 'node:crypto';
 import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { convertBbmodel } from './bbmodel.mjs';
+import { normalizePublicServerAddress } from './competitionServers.mjs';
 
 const ALLOWED_EXTENSIONS = new Set(['.png', '.json']);
 const MAX_RESOURCE_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -115,6 +116,27 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       const publicStorefront = method === 'GET' && (path === '/v1/storefront/catalog' || path === '/v1/storefront/payments' || /^\/v1\/resources\/[a-z0-9_-]+$/.test(path));
       requireThat(publicStorefront || !request.headers.get('origin') || request.headers.get('origin') === origin, 'Origen no permitido', 403);
       const authorization = request.headers.get('authorization');
+
+      // The launcher reaches this route only after the user explicitly enables
+      // anonymous statistics. Keep the per-installation identifier pseudonymous
+      // even in the database and accept only already-normalized public hosts.
+      if (method === 'POST' && path === '/v1/telemetry/competition-servers') {
+        const telemetryRateKey = `telemetry:${remoteAddress}`;
+        const telemetryBucket = accountAuthRates.get(telemetryRateKey) ?? { count: 0, until: time + 60_000 };
+        telemetryBucket.count++; accountAuthRates.set(telemetryRateKey, telemetryBucket);
+        requireThat(telemetryBucket.count <= 10, 'Demasiadas actualizaciones; espera un minuto', 429);
+        const input = await body(request);
+        requireThat(typeof input.installationId === 'string'
+          && /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(input.installationId), 'Instalación inválida');
+        requireThat(Array.isArray(input.servers) && input.servers.length <= 200, 'Lista de servidores inválida');
+        const servers = [...new Set(input.servers.map(value => {
+          const normalized = normalizePublicServerAddress(value);
+          requireThat(normalized && normalized === value, 'Dirección de servidor inválida');
+          return normalized;
+        }))];
+        const installationHash = createHmac('sha256', adminToken).update(input.installationId).digest('hex');
+        return json(store.replaceCompetitionServers(installationHash, servers, time));
+      }
 
       // ── AFK Farm metered usage (short-lived restricted bearer) ───────
       if (path.startsWith('/v1/afk/')) {
@@ -389,6 +411,10 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
 
         // Admin account management
         if (method === 'GET' && path === '/v1/admin/accounts') return json({ items: store.listAdmins() });
+        if (method === 'GET' && path === '/v1/admin/competition-servers') {
+          const start = offset(url), items = store.competitionServers(url.searchParams.get('q') ?? '', start);
+          return json({ items, nextOffset: items.length === 50 ? start + 50 : null });
+        }
         if (method === 'POST' && path === '/v1/admin/accounts') {
           requireThat(admin.role === 'superadmin', 'Permiso requerido', 403);
           const input = await body(request);

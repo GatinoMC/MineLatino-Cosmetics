@@ -12,6 +12,7 @@ import { createApi } from '../src/api.mjs';
 import { createHttpServer } from '../src/http.mjs';
 import { AiService, createAiServiceFromEnv } from '../src/ai.mjs';
 import { AfkUsageService } from '../src/afkUsage.mjs';
+import { normalizePublicServerAddress } from '../src/competitionServers.mjs';
 import { DatabaseSync } from 'node:sqlite';
 
 const OWNER = '1234567890abcdef1234567890abcdef';
@@ -19,6 +20,44 @@ const OTHER = 'abcdef1234567890abcdef1234567890';
 const ADMIN = 'test-only-admin-token-not-for-deployment-123456';
 const catalog = { name: 'Capa de prueba', slot: 'CAPE', status: 'published', expectedRevision: 0 };
 const grant = { uuid: OWNER, cosmeticId: 'cape', reference: 'manual-1', reason: 'Prueba' };
+
+test('competition server addresses keep only normalized public destinations', () => {
+  assert.equal(normalizePublicServerAddress('Play.Example.COM:25565'), 'play.example.com');
+  assert.equal(normalizePublicServerAddress('203.10.20.30:25570'), '203.10.20.30:25570');
+  for (const value of ['localhost', 'server.lan', '192.168.1.10', '10.0.0.8', '127.0.0.1', '203.0.113.10', 'host name.example']) {
+    assert.equal(normalizePublicServerAddress(value), undefined, value);
+  }
+});
+
+test('opt-in competition telemetry deduplicates profiles and counts installations', async t => {
+  const { request } = fixture(t);
+  const first = '11111111-1111-4111-8111-111111111111';
+  const second = '22222222-2222-4222-8222-222222222222';
+  assert.equal((await request('/v1/telemetry/competition-servers', { method: 'POST', data: {
+    installationId: first, servers: ['play.example.com', 'play.example.com', '203.10.20.30:25570'],
+  } })).status, 200);
+  await request('/v1/telemetry/competition-servers', { method: 'POST', data: {
+    installationId: second, servers: ['play.example.com'],
+  } });
+  let result = await request('/v1/admin/competition-servers', { token: ADMIN });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data.items.map(item => [item.address, item.installations]), [
+    ['play.example.com', 2], ['203.10.20.30:25570', 1],
+  ]);
+
+  // A later full snapshot replaces this installation's previous list.
+  await request('/v1/telemetry/competition-servers', { method: 'POST', data: {
+    installationId: first, servers: ['new.example.com'],
+  } });
+  result = await request('/v1/admin/competition-servers', { token: ADMIN });
+  assert.deepEqual(result.data.items.map(item => [item.address, item.installations]), [
+    ['new.example.com', 1], ['play.example.com', 1],
+  ]);
+  assert.equal((await request('/v1/admin/competition-servers')).status, 401);
+  assert.equal((await request('/v1/telemetry/competition-servers', { method: 'POST', data: {
+    installationId: first, servers: ['192.168.1.2'],
+  } })).status, 400);
+});
 
 test('backpack and pet equip in independent slots and are visible through public appearance', async t => {
   const { store, request, login } = fixture(t);

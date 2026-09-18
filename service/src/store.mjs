@@ -105,6 +105,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS afk_usage_sessions(id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES player_accounts(account_id) ON DELETE CASCADE, status TEXT NOT NULL CHECK(status IN ('active','stopped','exhausted')), started_at INTEGER NOT NULL, last_heartbeat_at INTEGER NOT NULL, stopped_at INTEGER, consumed_seconds INTEGER NOT NULL DEFAULT 0 CHECK(consumed_seconds>=0));
       CREATE INDEX IF NOT EXISTS afk_usage_owner ON afk_usage_sessions(account_id,started_at);
       CREATE UNIQUE INDEX IF NOT EXISTS afk_usage_one_active ON afk_usage_sessions(account_id) WHERE status='active';
+      CREATE TABLE IF NOT EXISTS competition_server_installations(installation_hash TEXT NOT NULL, address TEXT NOT NULL, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, PRIMARY KEY(installation_hash,address));
+      CREATE INDEX IF NOT EXISTS competition_server_address ON competition_server_installations(address,last_seen_at);
       `);
     // Migration: ensure model columns exist (for databases that may have incomplete migration)
     const columns = this.db.prepare("PRAGMA table_info(resources)").all().map(c => c.name);
@@ -444,6 +446,38 @@ export class Store {
     this.db.prepare('DELETE FROM account_presence WHERE account_id=?').run(accountId);
     this.audit(actor, 'player-account.delete', { accountId });
     return result;
+  }
+
+  // ── Anonymous, opt-in launcher statistics ──────────────────────────
+
+  replaceCompetitionServers(installationHash, addresses, now = Date.now()) {
+    return this.transaction(() => {
+      const current = new Set(addresses);
+      for (const address of current) {
+        this.db.prepare(`INSERT INTO competition_server_installations
+          (installation_hash,address,first_seen_at,last_seen_at) VALUES(?,?,?,?)
+          ON CONFLICT(installation_hash,address) DO UPDATE SET last_seen_at=excluded.last_seen_at`)
+          .run(installationHash, address, now, now);
+      }
+      const previous = this.db.prepare('SELECT address FROM competition_server_installations WHERE installation_hash=?').all(installationHash);
+      const remove = this.db.prepare('DELETE FROM competition_server_installations WHERE installation_hash=? AND address=?');
+      for (const row of previous) if (!current.has(row.address)) remove.run(installationHash, row.address);
+      return { accepted: current.size };
+    });
+  }
+
+  competitionServers(query = '', offset = 0) {
+    const pattern = `%${String(query).trim().toLowerCase().slice(0, 255)}%`;
+    return this.db.prepare(`SELECT address,COUNT(*) AS installations,
+        MIN(first_seen_at) AS firstSeenAt,MAX(last_seen_at) AS lastSeenAt
+      FROM competition_server_installations
+      WHERE lower(address) LIKE ?
+      GROUP BY address
+      ORDER BY installations DESC,lastSeenAt DESC,address
+      LIMIT 50 OFFSET ?`).all(pattern, offset).map(row => ({
+        ...row,
+        installations: Number(row.installations),
+      }));
   }
   migrateAccountSessions() {
     const columns = this.db.prepare("PRAGMA table_info(account_sessions)").all().map(column => column.name);
