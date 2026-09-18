@@ -107,6 +107,16 @@ export class Store {
       CREATE UNIQUE INDEX IF NOT EXISTS afk_usage_one_active ON afk_usage_sessions(account_id) WHERE status='active';
       CREATE TABLE IF NOT EXISTS competition_server_installations(installation_hash TEXT NOT NULL, address TEXT NOT NULL, first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, PRIMARY KEY(installation_hash,address));
       CREATE INDEX IF NOT EXISTS competition_server_address ON competition_server_installations(address,last_seen_at);
+      CREATE TABLE IF NOT EXISTS launcher_resource_packs(
+        minecraft_version TEXT PRIMARY KEY CHECK(minecraft_version IN ('1.21.4','1.21.11','26.2')),
+        file_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        sha1 TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        file_size INTEGER NOT NULL CHECK(file_size>0),
+        revision INTEGER NOT NULL,
+        uploaded_at INTEGER NOT NULL
+      );
       `);
     // Migration: ensure model columns exist (for databases that may have incomplete migration)
     const columns = this.db.prepare("PRAGMA table_info(resources)").all().map(c => c.name);
@@ -902,6 +912,36 @@ export class Store {
     this.db.prepare('UPDATE resource_files SET mcmeta_path=NULL, mcmeta_size=NULL WHERE cosmetic_id=? AND name=?')
       .run(cosmeticId(id), name);
     return this.getResourceFile(id, name);
+  }
+
+  // ── Launcher-managed resource packs ───────────────────────────────
+
+  listLauncherResourcePacks() {
+    return this.db.prepare('SELECT * FROM launcher_resource_packs ORDER BY minecraft_version').all();
+  }
+
+  getLauncherResourcePack(minecraftVersion) {
+    return this.db.prepare('SELECT * FROM launcher_resource_packs WHERE minecraft_version=?').get(minecraftVersion);
+  }
+
+  saveLauncherResourcePack(minecraftVersion, fileName, filePath, sha1, sha256, fileSize) {
+    const old = this.getLauncherResourcePack(minecraftVersion);
+    const revision = Number(old?.revision ?? 0) + 1;
+    const uploadedAt = Date.now();
+    this.db.prepare(`INSERT INTO launcher_resource_packs(
+      minecraft_version,file_name,file_path,sha1,sha256,file_size,revision,uploaded_at
+    ) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(minecraft_version) DO UPDATE SET
+      file_name=excluded.file_name,file_path=excluded.file_path,sha1=excluded.sha1,
+      sha256=excluded.sha256,file_size=excluded.file_size,revision=excluded.revision,
+      uploaded_at=excluded.uploaded_at`)
+      .run(minecraftVersion, fileName, filePath, sha1, sha256, fileSize, revision, uploadedAt);
+    return this.getLauncherResourcePack(minecraftVersion);
+  }
+
+  deleteLauncherResourcePack(minecraftVersion) {
+    const old = this.getLauncherResourcePack(minecraftVersion);
+    if (old) this.db.prepare('DELETE FROM launcher_resource_packs WHERE minecraft_version=?').run(minecraftVersion);
+    return old;
   }
 
   // ── Cosmetic transforms (position/rotation/scale per slot) ─────────

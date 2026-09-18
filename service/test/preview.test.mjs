@@ -74,7 +74,7 @@ test('admin inline scripts remain syntactically valid', () => {
 
 test('redesigned admin separates catalog, product data and 3D resources', () => {
   const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
-  for (const id of ['tab-catalog', 'tab-details', 'tab-resources', 'tab-grant', 'tab-players', 'tab-menu', 'tab-afk', 'tab-audit'])
+  for (const id of ['tab-catalog', 'tab-details', 'tab-resources', 'tab-grant', 'tab-players', 'tab-resource-packs', 'tab-menu', 'tab-afk', 'tab-audit'])
     assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, `${id} must be unique`);
   assert(html.includes('class="sidebar"'));
   assert(html.includes('href="admin.css"'));
@@ -93,6 +93,7 @@ test('redesigned admin separates catalog, product data and 3D resources', () => 
   assert(html.includes('Podrá equiparse cuando publiques el producto.'));
   assert(html.includes('function buildAfkTimingPlan()'));
   assert(html.includes('src="afk-timing.js"'));
+  assert(html.includes('/v1/admin/launcher/resource-packs/${version}'));
 });
 
 test('AFK web simulator mirrors post-join, between-command and movement delays', () => {

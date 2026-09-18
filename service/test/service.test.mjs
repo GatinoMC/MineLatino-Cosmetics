@@ -755,6 +755,49 @@ function fixtureWithResources(t, options = {}) {
   return { store, api, request, resourceDir };
 }
 
+test('admin publishes versioned launcher resource packs and clients receive a verified manifest', async t => {
+  const { store, request, resourceDir } = fixtureWithResources(t);
+  const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]);
+  assert.equal((await request('/v1/admin/launcher/resource-packs/1.21.4', {
+    method: 'PUT', headers: { 'X-Filename': 'Gatino HD.zip' }, body: zip,
+  })).status, 401);
+  const published = await request('/v1/admin/launcher/resource-packs/1.21.4', {
+    method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'Gatino HD.zip', 'Content-Type': 'application/zip' }, body: zip,
+  });
+  assert.equal(published.status, 200);
+  assert.equal(published.data.minecraftVersion, '1.21.4');
+  assert.equal(published.data.fileName, 'Gatino HD.zip');
+  assert.match(published.data.sha1, /^[a-f0-9]{40}$/);
+  assert.equal(store.listLauncherResourcePacks().length, 1);
+  assert.equal(existsSync(join(resourceDir, store.getLauncherResourcePack('1.21.4').file_path)), true);
+
+  const manifest = await request('/v1/launcher/resource-packs');
+  assert.equal(manifest.status, 200);
+  assert.deepEqual(manifest.data.items.map(item => [item.minecraftVersion, item.revision]), [['1.21.4', 1]]);
+  const download = await request(manifest.data.items[0].downloadUrl);
+  assert.equal(download.status, 200);
+  assert.deepEqual(Buffer.from(download.data), zip);
+  assert.equal(download.headers.get('content-type'), 'application/zip');
+
+  const removed = await request('/v1/admin/launcher/resource-packs/1.21.4', { method: 'DELETE', token: ADMIN });
+  assert.equal(removed.status, 200);
+  assert.equal(store.listLauncherResourcePacks().length, 0);
+  assert.equal((await request('/v1/launcher/resource-packs/1.21.4/file')).status, 404);
+});
+
+test('launcher resource pack upload rejects wrong versions, extensions and file signatures', async t => {
+  const { request } = fixtureWithResources(t);
+  assert.equal((await request('/v1/admin/launcher/resource-packs/1.20.1', {
+    method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'pack.zip' }, body: Buffer.alloc(22),
+  })).status, 404);
+  assert.equal((await request('/v1/admin/launcher/resource-packs/26.2', {
+    method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'pack.jar' }, body: Buffer.alloc(22),
+  })).status, 415);
+  assert.equal((await request('/v1/admin/launcher/resource-packs/26.2', {
+    method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'pack.zip' }, body: Buffer.alloc(22),
+  })).status, 400);
+});
+
 test('admin can permanently delete an unsold cosmetic and all associated data and files', async t => {
   const { store, request, resourceDir } = fixtureWithResources(t);
   const id = 'delete-pack';

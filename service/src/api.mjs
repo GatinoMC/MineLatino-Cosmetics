@@ -9,6 +9,8 @@ import { normalizePublicServerAddress } from './competitionServers.mjs';
 const ALLOWED_EXTENSIONS = new Set(['.png', '.json']);
 const MAX_RESOURCE_SIZE = 2 * 1024 * 1024; // 2 MB
 const MAX_BBMODEL_SIZE = 16 * 1024 * 1024; // embedded textures make editable projects larger
+const MAX_LAUNCHER_RESOURCE_PACK_SIZE = 128 * 1024 * 1024;
+const LAUNCHER_MINECRAFT_VERSIONS = new Set(['1.21.4', '1.21.11', '26.2']);
 
 async function body(request) {
   requireThat(request.headers.get('content-type')?.split(';')[0].trim() === 'application/json', 'Se requiere application/json', 415);
@@ -73,6 +75,18 @@ function validateResourceFile(buffer, filename) {
   return ext;
 }
 
+function validateLauncherResourcePack(buffer, filename) {
+  const safe = basename(filename);
+  requireThat(safe === filename && !safe.includes('..') && !safe.includes('/') && !safe.includes('\\'), 'Nombre de archivo inválido');
+  requireThat(!/[\u0000-\u001f\u007f"]/u.test(safe), 'Nombre de archivo inválido');
+  requireThat(extname(safe).toLowerCase() === '.zip', 'El paquete debe ser un archivo ZIP', 415);
+  requireThat(buffer.length >= 22, 'Archivo ZIP vacío o incompleto');
+  requireThat(buffer.length <= MAX_LAUNCHER_RESOURCE_PACK_SIZE, 'El paquete supera el máximo de 128 MB', 413);
+  requireThat(buffer[0] === 0x50 && buffer[1] === 0x4b
+    && ((buffer[2] === 0x03 && buffer[3] === 0x04) || (buffer[2] === 0x05 && buffer[3] === 0x06)), 'Archivo ZIP inválido');
+  return safe;
+}
+
 export function createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin = 'http://127.0.0.1:8787', playerAuth = new PlayerAuth(), premiumEnabled = true, now = Date.now }) {
   requireThat(typeof adminToken === 'string' && adminToken.length >= 32, 'Configura una clave administrativa de al menos 32 caracteres');
   if (resourceDir) mkdirSync(resourceDir, { recursive: true });
@@ -102,6 +116,16 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       petAnimation?.sha256, petAnimation?.animation_name, petAnimation?.updated_at,
       Object.entries(transforms).map(([slot, value]) => [slot, value.updatedAt])])).digest('hex').slice(0, 12);
   }
+  const launcherResourcePackView = row => ({
+    minecraftVersion: row.minecraft_version,
+    fileName: row.file_name,
+    sha1: row.sha1,
+    sha256: row.sha256,
+    fileSize: row.file_size,
+    revision: row.revision,
+    uploadedAt: row.uploaded_at,
+    downloadUrl: `/v1/launcher/resource-packs/${row.minecraft_version}/file`,
+  });
   return async (request, remoteAddress = 'local') => {
     try {
       const time = now();
@@ -113,7 +137,9 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       requireThat(bucket.count <= 120, 'Demasiadas solicitudes; espera un minuto', 429);
       const url = new URL(request.url), path = url.pathname, method = request.method;
       // Only published storefront data is cross-origin readable. Admin/auth routes remain same-origin.
-      const publicStorefront = method === 'GET' && (path === '/v1/storefront/catalog' || path === '/v1/storefront/payments' || /^\/v1\/resources\/[a-z0-9_-]+$/.test(path));
+      const publicStorefront = method === 'GET' && (path === '/v1/storefront/catalog' || path === '/v1/storefront/payments'
+        || path === '/v1/launcher/resource-packs' || /^\/v1\/launcher\/resource-packs\/(?:1\.21\.4|1\.21\.11|26\.2)\/file$/.test(path)
+        || /^\/v1\/resources\/[a-z0-9_-]+$/.test(path));
       requireThat(publicStorefront || !request.headers.get('origin') || request.headers.get('origin') === origin, 'Origen no permitido', 403);
       const authorization = request.headers.get('authorization');
 
@@ -281,6 +307,26 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
         return Response.json({ items, nextOffset: items.length === 50 ? start + 50 : null },
           { headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' } });
       }
+      if (publicStorefront && path === '/v1/launcher/resource-packs') {
+        return Response.json({ schemaVersion: 1, items: store.listLauncherResourcePacks().map(launcherResourcePackView) },
+          { headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' } });
+      }
+      const launcherResourcePackDownload = path.match(/^\/v1\/launcher\/resource-packs\/(1\.21\.4|1\.21\.11|26\.2)\/file$/);
+      if (publicStorefront && launcherResourcePackDownload) {
+        requireThat(resourceDir, 'Recursos no disponibles', 503);
+        const pack = store.getLauncherResourcePack(launcherResourcePackDownload[1]);
+        requireThat(pack, 'Paquete no configurado', 404);
+        const filePath = join(resourceDir, pack.file_path);
+        requireThat(existsSync(filePath), 'Archivo no encontrado', 404);
+        const fileData = readFileSync(filePath);
+        requireThat(createHash('sha256').update(fileData).digest('hex') === pack.sha256, 'Integridad comprometida', 500);
+        return new Response(fileData, { status: 200, headers: {
+          'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600, immutable',
+          'Content-Type': 'application/zip', 'Content-Length': String(fileData.length),
+          'Content-Disposition': `attachment; filename="${pack.file_name}"`,
+          'ETag': `"${pack.sha256}"`, 'X-Content-Type-Options': 'nosniff',
+        } });
+      }
       // Checkout is authenticated under /v1/account/orders. Never accept an
       // owner UUID, account ID, or payment approval supplied by the renderer.
       if (method === 'POST' && path === '/v1/storefront/checkout') throw new ApiError(410, 'Usa el checkout autenticado del launcher');
@@ -408,6 +454,56 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       if (path.startsWith('/v1/admin/')) {
         const admin = requireAdmin(authorization);
         const actor = admin.username;
+
+        if (method === 'GET' && path === '/v1/admin/launcher/resource-packs') {
+          return json({ items: store.listLauncherResourcePacks().map(launcherResourcePackView) });
+        }
+        const launcherResourcePackAdmin = path.match(/^\/v1\/admin\/launcher\/resource-packs\/(1\.21\.4|1\.21\.11|26\.2)$/);
+        if (method === 'PUT' && launcherResourcePackAdmin) {
+          requireThat(resourceDir, 'Recursos no disponibles', 503);
+          const minecraftVersion = launcherResourcePackAdmin[1];
+          requireThat(LAUNCHER_MINECRAFT_VERSIONS.has(minecraftVersion), 'Versión de Minecraft no admitida');
+          const requestedName = request.headers.get('x-filename') || `GatinoLauncher-${minecraftVersion}.zip`;
+          const buffer = await binaryBody(request, MAX_LAUNCHER_RESOURCE_PACK_SIZE);
+          const fileName = validateLauncherResourcePack(buffer, requestedName);
+          const sha1 = createHash('sha1').update(buffer).digest('hex');
+          const sha256 = createHash('sha256').update(buffer).digest('hex');
+          const filePath = `launcher-resourcepack-${minecraftVersion.replaceAll('.', '-')}-${sha256.slice(0, 16)}.zip`;
+          const old = store.getLauncherResourcePack(minecraftVersion);
+          const absolutePath = join(resourceDir, filePath);
+          if (existsSync(absolutePath)) {
+            requireThat(createHash('sha256').update(readFileSync(absolutePath)).digest('hex') === sha256,
+              'Ya existe un archivo distinto con el mismo identificador', 409);
+          } else writeFileSync(absolutePath, buffer, { flag: 'wx' });
+          let saved;
+          try {
+            saved = store.saveLauncherResourcePack(minecraftVersion, fileName, filePath, sha1, sha256, buffer.length);
+          } catch (error) {
+            try { unlinkSync(join(resourceDir, filePath)); } catch {}
+            throw error;
+          }
+          if (old?.file_path && old.file_path !== filePath) {
+            const oldPath = join(resourceDir, old.file_path);
+            try { if (existsSync(oldPath)) unlinkSync(oldPath); } catch (error) {
+              console.warn(`[launcher.resource-pack] No se pudo eliminar ${old.file_path}:`, error);
+            }
+          }
+          store.audit(actor, 'launcher.resource-pack.publish', { minecraftVersion, fileName, sha256, fileSize: buffer.length, revision: saved.revision });
+          return json(launcherResourcePackView(saved));
+        }
+        if (method === 'DELETE' && launcherResourcePackAdmin) {
+          requireThat(resourceDir, 'Recursos no disponibles', 503);
+          const minecraftVersion = launcherResourcePackAdmin[1];
+          const old = store.deleteLauncherResourcePack(minecraftVersion);
+          if (old?.file_path) {
+            const oldPath = join(resourceDir, old.file_path);
+            try { if (existsSync(oldPath)) unlinkSync(oldPath); } catch (error) {
+              console.warn(`[launcher.resource-pack] No se pudo eliminar ${old.file_path}:`, error);
+            }
+          }
+          if (old) store.audit(actor, 'launcher.resource-pack.delete', { minecraftVersion, fileName: old.file_name, revision: old.revision });
+          return json({ deleted: !!old });
+        }
 
         // Admin account management
         if (method === 'GET' && path === '/v1/admin/accounts') return json({ items: store.listAdmins() });
