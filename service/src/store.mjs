@@ -925,17 +925,30 @@ export class Store {
   }
 
   saveLauncherResourcePack(minecraftVersion, fileName, filePath, sha1, sha256, fileSize) {
-    const old = this.getLauncherResourcePack(minecraftVersion);
-    const revision = Number(old?.revision ?? 0) + 1;
+    return this.saveLauncherResourcePacks([{ minecraftVersion, fileName, filePath, sha1, sha256, fileSize }])[0];
+  }
+
+  saveLauncherResourcePacks(packs) {
     const uploadedAt = Date.now();
-    this.db.prepare(`INSERT INTO launcher_resource_packs(
+    const statement = this.db.prepare(`INSERT INTO launcher_resource_packs(
       minecraft_version,file_name,file_path,sha1,sha256,file_size,revision,uploaded_at
     ) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(minecraft_version) DO UPDATE SET
       file_name=excluded.file_name,file_path=excluded.file_path,sha1=excluded.sha1,
       sha256=excluded.sha256,file_size=excluded.file_size,revision=excluded.revision,
-      uploaded_at=excluded.uploaded_at`)
-      .run(minecraftVersion, fileName, filePath, sha1, sha256, fileSize, revision, uploadedAt);
-    return this.getLauncherResourcePack(minecraftVersion);
+      uploaded_at=excluded.uploaded_at`);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const pack of packs) {
+        const old = this.getLauncherResourcePack(pack.minecraftVersion);
+        statement.run(pack.minecraftVersion, pack.fileName, pack.filePath, pack.sha1, pack.sha256,
+          pack.fileSize, Number(old?.revision ?? 0) + 1, uploadedAt);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+    return packs.map(pack => this.getLauncherResourcePack(pack.minecraftVersion));
   }
 
   deleteLauncherResourcePack(minecraftVersion) {

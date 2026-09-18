@@ -87,6 +87,11 @@ function validateLauncherResourcePack(buffer, filename) {
   return safe;
 }
 
+function encodeContentDispositionFilename(value) {
+  return encodeURIComponent(value).replace(/['()*]/g, character =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
 export function createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin = 'http://127.0.0.1:8787', playerAuth = new PlayerAuth(), premiumEnabled = true, now = Date.now }) {
   requireThat(typeof adminToken === 'string' && adminToken.length >= 32, 'Configura una clave administrativa de al menos 32 caracteres');
   if (resourceDir) mkdirSync(resourceDir, { recursive: true });
@@ -126,6 +131,75 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
     uploadedAt: row.uploaded_at,
     downloadUrl: `/v1/launcher/resource-packs/${row.minecraft_version}/file`,
   });
+
+  const launcherResourcePackName = (request, fallback) => {
+    const encoded = request.headers.get('x-filename-uri');
+    if (!encoded) return request.headers.get('x-filename') || fallback;
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      throw new ApiError(400, 'Nombre de archivo inválido');
+    }
+  };
+
+  const publishLauncherResourcePacks = async ({ minecraftVersions, requestedName, buffer, actor }) => {
+    requireThat(resourceDir, 'Almacenamiento de paquetes no configurado', 503);
+    const fileName = validateLauncherResourcePack(buffer, requestedName);
+
+    const sha1 = createHash('sha1').update(buffer).digest('hex');
+    const sha256 = createHash('sha256').update(buffer).digest('hex');
+    const previousByVersion = new Map(
+      minecraftVersions.map(version => [version, store.getLauncherResourcePack(version)]),
+    );
+    const entries = minecraftVersions.map(minecraftVersion => ({
+      minecraftVersion,
+      fileName,
+      sha1,
+      sha256,
+      fileSize: buffer.length,
+      filePath: `launcher-resourcepack-${minecraftVersion}-${sha256.slice(0, 16)}.zip`,
+    }));
+    const newlyCreated = [];
+
+    let saved;
+    try {
+      mkdirSync(resourceDir, { recursive: true });
+      for (const entry of entries) {
+        const absolutePath = join(resourceDir, entry.filePath);
+        const alreadyExists = existsSync(absolutePath);
+        if (alreadyExists) {
+          requireThat(createHash('sha256').update(readFileSync(absolutePath)).digest('hex') === sha256,
+            'Ya existe un archivo distinto con el mismo identificador', 409);
+        } else {
+          writeFileSync(absolutePath, buffer);
+          newlyCreated.push(absolutePath);
+        }
+      }
+
+      saved = store.saveLauncherResourcePacks(entries);
+    } catch (error) {
+      for (const filePath of newlyCreated) {
+        try { unlinkSync(filePath); } catch { /* best effort */ }
+      }
+      throw error;
+    }
+
+    for (const row of saved) {
+      const previous = previousByVersion.get(row.minecraft_version);
+      if (previous?.file_path && previous.file_path !== row.file_path) {
+        try { unlinkSync(join(resourceDir, previous.file_path)); }
+        catch (error) { if (error.code !== 'ENOENT') console.warn('[launcher.resource-pack] No se pudo retirar el paquete anterior:', error); }
+      }
+      store.audit(actor, 'launcher.resource-pack.publish', {
+        minecraftVersion: row.minecraft_version,
+        fileName: row.file_name,
+        sha256: row.sha256,
+        fileSize: row.file_size,
+        revision: row.revision,
+      });
+    }
+    return saved;
+  };
   return async (request, remoteAddress = 'local') => {
     try {
       const time = now();
@@ -323,7 +397,7 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
         return new Response(fileData, { status: 200, headers: {
           'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600, immutable',
           'Content-Type': 'application/zip', 'Content-Length': String(fileData.length),
-          'Content-Disposition': `attachment; filename="${pack.file_name}"`,
+          'Content-Disposition': `attachment; filename="GatinoLauncher-${launcherResourcePackDownload[1]}.zip"; filename*=UTF-8''${encodeContentDispositionFilename(pack.file_name)}`,
           'ETag': `"${pack.sha256}"`, 'X-Content-Type-Options': 'nosniff',
         } });
       }
@@ -458,37 +532,32 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
         if (method === 'GET' && path === '/v1/admin/launcher/resource-packs') {
           return json({ items: store.listLauncherResourcePacks().map(launcherResourcePackView) });
         }
+        if (method === 'PUT' && path === '/v1/admin/launcher/resource-packs') {
+          const minecraftVersions = [...new Set((request.headers.get('x-minecraft-versions') || '')
+            .split(',').map(value => value.trim()).filter(Boolean))];
+          requireThat(minecraftVersions.length > 0 && minecraftVersions.length <= LAUNCHER_MINECRAFT_VERSIONS.size,
+            'Selecciona al menos una versión de Minecraft');
+          requireThat(minecraftVersions.every(version => LAUNCHER_MINECRAFT_VERSIONS.has(version)),
+            'Versión de Minecraft no admitida');
+          const buffer = await binaryBody(request, MAX_LAUNCHER_RESOURCE_PACK_SIZE);
+          const saved = await publishLauncherResourcePacks({
+            minecraftVersions,
+            requestedName: launcherResourcePackName(request, 'GatinoLauncher.zip'),
+            buffer,
+            actor,
+          });
+          return json({ items: saved.map(launcherResourcePackView) });
+        }
         const launcherResourcePackAdmin = path.match(/^\/v1\/admin\/launcher\/resource-packs\/(1\.21\.4|1\.21\.11|26\.2)$/);
         if (method === 'PUT' && launcherResourcePackAdmin) {
-          requireThat(resourceDir, 'Recursos no disponibles', 503);
           const minecraftVersion = launcherResourcePackAdmin[1];
-          requireThat(LAUNCHER_MINECRAFT_VERSIONS.has(minecraftVersion), 'Versión de Minecraft no admitida');
-          const requestedName = request.headers.get('x-filename') || `GatinoLauncher-${minecraftVersion}.zip`;
           const buffer = await binaryBody(request, MAX_LAUNCHER_RESOURCE_PACK_SIZE);
-          const fileName = validateLauncherResourcePack(buffer, requestedName);
-          const sha1 = createHash('sha1').update(buffer).digest('hex');
-          const sha256 = createHash('sha256').update(buffer).digest('hex');
-          const filePath = `launcher-resourcepack-${minecraftVersion.replaceAll('.', '-')}-${sha256.slice(0, 16)}.zip`;
-          const old = store.getLauncherResourcePack(minecraftVersion);
-          const absolutePath = join(resourceDir, filePath);
-          if (existsSync(absolutePath)) {
-            requireThat(createHash('sha256').update(readFileSync(absolutePath)).digest('hex') === sha256,
-              'Ya existe un archivo distinto con el mismo identificador', 409);
-          } else writeFileSync(absolutePath, buffer, { flag: 'wx' });
-          let saved;
-          try {
-            saved = store.saveLauncherResourcePack(minecraftVersion, fileName, filePath, sha1, sha256, buffer.length);
-          } catch (error) {
-            try { unlinkSync(join(resourceDir, filePath)); } catch {}
-            throw error;
-          }
-          if (old?.file_path && old.file_path !== filePath) {
-            const oldPath = join(resourceDir, old.file_path);
-            try { if (existsSync(oldPath)) unlinkSync(oldPath); } catch (error) {
-              console.warn(`[launcher.resource-pack] No se pudo eliminar ${old.file_path}:`, error);
-            }
-          }
-          store.audit(actor, 'launcher.resource-pack.publish', { minecraftVersion, fileName, sha256, fileSize: buffer.length, revision: saved.revision });
+          const [saved] = await publishLauncherResourcePacks({
+            minecraftVersions: [minecraftVersion],
+            requestedName: launcherResourcePackName(request, `GatinoLauncher-${minecraftVersion}.zip`),
+            buffer,
+            actor,
+          });
           return json(launcherResourcePackView(saved));
         }
         if (method === 'DELETE' && launcherResourcePackAdmin) {

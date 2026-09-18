@@ -38,7 +38,7 @@ function staticSecurityHeaders(publicDir) {
 /** Transport only; injectable API keeps HTTP smoke tests network-isolated. */
 export function createHttpServer(api, origin, publicDir = null, { trustRailwayProxy = false, trustedProxyAddresses = [] } = {}) {
   const staticHeaders = staticSecurityHeaders(publicDir);
-  return createServer({ maxHeaderSize: 8192, requestTimeout: 15_000, headersTimeout: 10_000 }, async (req, res) => {
+  return createServer({ maxHeaderSize: 8192, requestTimeout: 180_000, headersTimeout: 10_000 }, async (req, res) => {
     // Serve static files for the admin panel (only GET, only from publicDir)
     if (publicDir && req.method === 'GET' && !req.url.startsWith('/v1/') && !req.url.startsWith('/health')) {
       const requestedPath = req.url === '/' ? '/index.html' : decodeURIComponent(req.url.split('?')[0]);

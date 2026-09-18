@@ -758,30 +758,36 @@ function fixtureWithResources(t, options = {}) {
 test('admin publishes versioned launcher resource packs and clients receive a verified manifest', async t => {
   const { store, request, resourceDir } = fixtureWithResources(t);
   const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]);
-  assert.equal((await request('/v1/admin/launcher/resource-packs/1.21.4', {
-    method: 'PUT', headers: { 'X-Filename': 'Gatino HD.zip' }, body: zip,
+  assert.equal((await request('/v1/admin/launcher/resource-packs', {
+    method: 'PUT', headers: { 'X-Filename-URI': encodeURIComponent('Gatino Épico 🚀.zip'), 'X-Minecraft-Versions': '1.21.4' }, body: zip,
   })).status, 401);
-  const published = await request('/v1/admin/launcher/resource-packs/1.21.4', {
-    method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'Gatino HD.zip', 'Content-Type': 'application/zip' }, body: zip,
+  const published = await request('/v1/admin/launcher/resource-packs', {
+    method: 'PUT', token: ADMIN, headers: {
+      'X-Filename-URI': encodeURIComponent('Gatino Épico 🚀.zip'),
+      'X-Minecraft-Versions': '1.21.4, 1.21.11, 26.2',
+      'Content-Type': 'application/zip',
+    }, body: zip,
   });
   assert.equal(published.status, 200);
-  assert.equal(published.data.minecraftVersion, '1.21.4');
-  assert.equal(published.data.fileName, 'Gatino HD.zip');
-  assert.match(published.data.sha1, /^[a-f0-9]{40}$/);
-  assert.equal(store.listLauncherResourcePacks().length, 1);
+  assert.deepEqual(published.data.items.map(item => item.minecraftVersion), ['1.21.4', '1.21.11', '26.2']);
+  assert(published.data.items.every(item => item.fileName === 'Gatino Épico 🚀.zip'));
+  assert(published.data.items.every(item => /^[a-f0-9]{40}$/.test(item.sha1)));
+  assert.equal(store.listLauncherResourcePacks().length, 3);
   assert.equal(existsSync(join(resourceDir, store.getLauncherResourcePack('1.21.4').file_path)), true);
 
   const manifest = await request('/v1/launcher/resource-packs');
   assert.equal(manifest.status, 200);
-  assert.deepEqual(manifest.data.items.map(item => [item.minecraftVersion, item.revision]), [['1.21.4', 1]]);
-  const download = await request(manifest.data.items[0].downloadUrl);
+  assert.deepEqual(manifest.data.items.map(item => [item.minecraftVersion, item.revision]),
+    [['1.21.11', 1], ['1.21.4', 1], ['26.2', 1]]);
+  const download = await request(manifest.data.items.find(item => item.minecraftVersion === '1.21.4').downloadUrl);
   assert.equal(download.status, 200);
   assert.deepEqual(Buffer.from(download.data), zip);
   assert.equal(download.headers.get('content-type'), 'application/zip');
+  assert.match(download.headers.get('content-disposition'), /filename\*=UTF-8''Gatino%20%C3%89pico/);
 
   const removed = await request('/v1/admin/launcher/resource-packs/1.21.4', { method: 'DELETE', token: ADMIN });
   assert.equal(removed.status, 200);
-  assert.equal(store.listLauncherResourcePacks().length, 0);
+  assert.equal(store.listLauncherResourcePacks().length, 2);
   assert.equal((await request('/v1/launcher/resource-packs/1.21.4/file')).status, 404);
 });
 
@@ -790,6 +796,9 @@ test('launcher resource pack upload rejects wrong versions, extensions and file 
   assert.equal((await request('/v1/admin/launcher/resource-packs/1.20.1', {
     method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'pack.zip' }, body: Buffer.alloc(22),
   })).status, 404);
+  assert.equal((await request('/v1/admin/launcher/resource-packs', {
+    method: 'PUT', token: ADMIN, headers: { 'X-Filename-URI': 'pack.zip', 'X-Minecraft-Versions': '1.20.1' }, body: Buffer.alloc(22),
+  })).status, 400);
   assert.equal((await request('/v1/admin/launcher/resource-packs/26.2', {
     method: 'PUT', token: ADMIN, headers: { 'X-Filename': 'pack.jar' }, body: Buffer.alloc(22),
   })).status, 415);

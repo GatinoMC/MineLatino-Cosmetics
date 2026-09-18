@@ -93,7 +93,11 @@ test('redesigned admin separates catalog, product data and 3D resources', () => 
   assert(html.includes('Podrá equiparse cuando publiques el producto.'));
   assert(html.includes('function buildAfkTimingPlan()'));
   assert(html.includes('src="afk-timing.js"'));
-  assert(html.includes('/v1/admin/launcher/resource-packs/${version}'));
+  assert(html.includes("fetch('/v1/admin/launcher/resource-packs'"));
+  assert(html.includes('data-launcher-pack-action="delete"'));
+  assert(html.includes("$('tab-resource-packs').addEventListener('click'"));
+  const resourcePackRenderer = html.match(/async function loadLauncherResourcePacks\(\).*$/m)?.[0] ?? '';
+  assert(!resourcePackRenderer.includes('onclick='));
 });
 
 test('AFK web simulator mirrors post-join, between-command and movement delays', () => {
