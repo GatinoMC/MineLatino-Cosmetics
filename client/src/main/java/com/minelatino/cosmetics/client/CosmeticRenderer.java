@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.PlayerCapeModel;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.RenderLayerParent;
@@ -86,6 +87,11 @@ public final class CosmeticRenderer extends RenderLayer<PlayerRenderState, Playe
             return;
         }
 
+        UUID afkUuid = ENTITY_UUID_MAP.get(renderState.id);
+        if (CosmeticsClient.instance().afkIndicators().active(afkUuid)) {
+            renderAfkBadge(poseStack, bufferSource);
+        }
+
         // Use state.id directly (public field in 1.21.4 PlayerRenderState)
         CosmeticPreview.Frame preview = CosmeticPreview.FRAME.get();
         List<EquipmentCache.EquippedItem> equipped;
@@ -143,6 +149,20 @@ public final class CosmeticRenderer extends RenderLayer<PlayerRenderState, Playe
         if (!hex.matches("[0-9a-fA-F]{32}")) throw new IllegalArgumentException("invalid UUID");
         return hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16)
                 + "-" + hex.substring(16, 20) + "-" + hex.substring(20);
+    }
+
+    private static void renderAfkBadge(PoseStack poseStack, MultiBufferSource bufferSource) {
+        Minecraft minecraft = Minecraft.getInstance();
+        String label = "AFK FARM";
+        poseStack.pushPose();
+        try {
+            poseStack.translate(0, 3.1, 0);
+            poseStack.mulPose(minecraft.gameRenderer.getMainCamera().rotation());
+            poseStack.scale(-0.025f, -0.025f, 0.025f);
+            minecraft.font.drawInBatch(label, -minecraft.font.width(label) / 2f, 0,
+                    0xFF55FFCC, false, poseStack.last().pose(), bufferSource,
+                    Font.DisplayMode.NORMAL, 0, 0xF000F0);
+        } finally { poseStack.popPose(); }
     }
 
     /** Renders a 3D model attached to the player. */

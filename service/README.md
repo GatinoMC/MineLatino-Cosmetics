@@ -34,6 +34,8 @@ administrativos, permisos de archivos, copias verificadas y operación multiinst
 | GET `/v1/cosmetics/catalog?offset=0` | Metadatos publicados, hasta 50 |
 | GET `/v1/cosmetics/appearance?uuids=<uuid>,<uuid>` | Equipamiento público, máximo 50 UUID |
 | GET `/v1/cosmetics/emotes?uuids=<uuid>&names=<nick>` | Emotes activos de jugadores cercanos |
+| GET `/v1/launcher/playtime-leaderboard` | Horas registradas y todas las cuentas activas, incluidas las de 0 horas |
+| GET `/v1/afk/active-players` | UUIDs con sesión AFK Farm vigente para el distintivo temporal del mod |
 | POST `/v1/account/emote` | Emitir un emote autenticado de la Skin equipada |
 | GET `/v1/client-config/pause-menu` | Última configuración válida y revisión |
 | GET `/v1/admin/cosmetics/catalog?offset=0` | Catálogo completo paginado |
@@ -54,6 +56,10 @@ administrativos, permisos de archivos, copias verificadas y operación multiinst
 | GET `/v1/ai/status` | Consultar disponibilidad y límites con token IA |
 | POST `/v1/ai/chat` | Enviar un mensaje idempotente en una conversación de la cuenta |
 | POST `/v1/ai/logout` | Revocar el token IA actual |
+
+`PLAYTIME_BACKEND_URL` permite configurar el origen del contador de horas; por
+defecto usa el backend MineLatino publicado. Si ese origen falla, la clasificación
+devuelve error en lugar de presentar horas incorrectas como cero.
 
 ## Asistente IA privado
 

@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.model.player.PlayerCapeModel;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.entity.RenderLayerParent;
@@ -14,6 +15,7 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import org.joml.Quaternionf;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.resources.Identifier;
+import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +88,11 @@ public final class CosmeticRenderer extends RenderLayer<AvatarRenderState, Playe
             return;
         }
 
+        UUID afkUuid = ENTITY_UUID_MAP.get(renderState.id);
+        if (CosmeticsClient.instance().afkIndicators().active(afkUuid)) {
+            renderAfkBadge(poseStack, collector);
+        }
+
         CosmeticPreview.Frame preview = PREVIEW_FRAMES.remove(renderState.id);
         List<EquipmentCache.EquippedItem> equipped;
         if (preview != null) {
@@ -137,6 +144,20 @@ public final class CosmeticRenderer extends RenderLayer<AvatarRenderState, Playe
         if (!hex.matches("[0-9a-fA-F]{32}")) throw new IllegalArgumentException("invalid UUID");
         return hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16)
                 + "-" + hex.substring(16, 20) + "-" + hex.substring(20);
+    }
+
+    private static void renderAfkBadge(PoseStack poseStack, SubmitNodeCollector collector) {
+        Minecraft minecraft = Minecraft.getInstance();
+        String label = "AFK FARM";
+        poseStack.pushPose();
+        try {
+            poseStack.translate(0, 3.1, 0);
+            poseStack.mulPose(minecraft.gameRenderer.getMainCamera().rotation());
+            poseStack.scale(-0.025f, -0.025f, 0.025f);
+            collector.submitText(poseStack, -minecraft.font.width(label) / 2f, 0,
+                    Component.literal(label).getVisualOrderText(), false, Font.DisplayMode.NORMAL,
+                    0xFF55FFCC, 0, 0xF000F0, 0);
+        } finally { poseStack.popPose(); }
     }
 
     private void renderModel(PoseStack poseStack, SubmitNodeCollector collector, int packedLight,

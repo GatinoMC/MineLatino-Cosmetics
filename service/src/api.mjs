@@ -5,6 +5,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from '
 import { join, extname, basename } from 'node:path';
 import { convertBbmodel } from './bbmodel.mjs';
 import { normalizePublicServerAddress } from './competitionServers.mjs';
+import { mergePlaytimeLeaderboard } from './playtimeLeaderboard.mjs';
 
 const ALLOWED_EXTENSIONS = new Set(['.png', '.json']);
 const MAX_RESOURCE_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -92,7 +93,8 @@ function encodeContentDispositionFilename(value) {
     `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-export function createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin = 'http://127.0.0.1:8787', playerAuth = new PlayerAuth(), premiumEnabled = true, now = Date.now }) {
+export function createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin = 'http://127.0.0.1:8787', playerAuth = new PlayerAuth(), premiumEnabled = true, now = Date.now,
+  playtimeBackendUrl = 'https://minelatino-production.up.railway.app', fetchPlaytime = fetch }) {
   requireThat(typeof adminToken === 'string' && adminToken.length >= 32, 'Configura una clave administrativa de al menos 32 caracteres');
   if (resourceDir) mkdirSync(resourceDir, { recursive: true });
   const rates = new Map();
@@ -212,10 +214,25 @@ export function createApi({ store, adminToken, adminAuth, accountAuth, commerce,
       const url = new URL(request.url), path = url.pathname, method = request.method;
       // Only published storefront data is cross-origin readable. Admin/auth routes remain same-origin.
       const publicStorefront = method === 'GET' && (path === '/v1/storefront/catalog' || path === '/v1/storefront/payments'
+        || path === '/v1/launcher/playtime-leaderboard' || path === '/v1/afk/active-players'
         || path === '/v1/launcher/resource-packs' || /^\/v1\/launcher\/resource-packs\/(?:1\.21\.4|1\.21\.11|26\.2)\/file$/.test(path)
         || /^\/v1\/resources\/[a-z0-9_-]+$/.test(path));
       requireThat(publicStorefront || !request.headers.get('origin') || request.headers.get('origin') === origin, 'Origen no permitido', 403);
       const authorization = request.headers.get('authorization');
+
+      if (method === 'GET' && path === '/v1/launcher/playtime-leaderboard') {
+        const response = await fetchPlaytime(`${playtimeBackendUrl}/api/playtime/leaderboard`, {
+          signal: AbortSignal.timeout(8_000),
+        });
+        requireThat(response.ok, 'No se pudo consultar la clasificación de horas', 502);
+        const data = await response.json();
+        requireThat(Array.isArray(data?.items), 'Clasificación de horas inválida', 502);
+        return json({ items: mergePlaytimeLeaderboard(data.items, store.rankingAccounts()) });
+      }
+
+      if (method === 'GET' && path === '/v1/afk/active-players') {
+        return json({ uuids: store.activeAfkProfiles(time) });
+      }
 
       // The launcher reaches this route only after the user explicitly enables
       // anonymous statistics. Keep the per-installation identifier pseudonymous

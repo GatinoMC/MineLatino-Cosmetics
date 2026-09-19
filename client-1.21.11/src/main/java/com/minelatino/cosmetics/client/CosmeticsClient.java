@@ -28,6 +28,7 @@ public final class CosmeticsClient {
     private final ApiClient api;
     private final AuthManager auth;
     private final EquipmentCache equipment;
+    private final AfkIndicatorCache afkIndicators;
     private final ResourceCache resources;
     private final WardrobeController wardrobe;
     private long lastEquipmentRefresh = 0;
@@ -53,6 +54,7 @@ public final class CosmeticsClient {
         this.api = new ApiClient(config.backendUrl(), config.hasAccountSession());
         this.auth = new AuthManager(api, config.accountToken(), config.accountId(), config.accountExpiresAt());
         this.equipment = new EquipmentCache(api);
+        this.afkIndicators = new AfkIndicatorCache(api);
         this.resources = new ResourceCache(config.backendUrl(), cacheDir);
         this.wardrobe = new WardrobeController(api, java.util.concurrent.ForkJoinPool.commonPool(),
                 task -> Minecraft.getInstance().execute(task), (uuid, entries) -> equipment.setEquipped(uuid,
@@ -87,6 +89,8 @@ public final class CosmeticsClient {
                 " session="+(diagnosticSession==null ? "none" : CosmeticsDiagnostics.id(diagnosticSession.uuid()))+
                 " auth="+auth.state()+" valid="+auth.isConnected());
         CosmeticRenderer.ENTITY_UUID_MAP.clear();
+        afkIndicators.tick(mc.level != null && mc.getCurrentServer() != null
+                && AfkIndicatorCache.allowedServer(mc.getCurrentServer().ip));
         if (mc.level == null) return;
 
 
@@ -183,6 +187,7 @@ public final class CosmeticsClient {
     public ApiClient api() { return api; }
     public AuthManager auth() { return auth; }
     public EquipmentCache equipment() { return equipment; }
+    public AfkIndicatorCache afkIndicators() { return afkIndicators; }
     public ResourceCache resources() { return resources; }
     public WardrobeController wardrobe() { return wardrobe; }
 

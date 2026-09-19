@@ -140,6 +140,17 @@ public final class ApiClient implements WardrobeController.Gateway {
         return parsed;
     }
 
+    public record ActiveAfkPlayers(List<String> uuids) {}
+
+    public ActiveAfkPlayers activeAfkPlayers() throws Exception {
+        TextResponse response = get("/v1/afk/active-players", null);
+        if (response.statusCode() != 200) throw responseError(response, "afk-indicator");
+        ActiveAfkPlayers parsed = GSON.fromJson(response.body(), ActiveAfkPlayers.class);
+        if (parsed == null || parsed.uuids() == null || parsed.uuids().size() > 1000)
+            throw new ApiException(502, "invalid-afk-indicator");
+        return parsed;
+    }
+
     // ── Health ────────────────────────────────────────────────────────
 
     public record HealthResponse(boolean ok, boolean premiumEnabled, boolean offlineAuthEnabled, String stage) {}

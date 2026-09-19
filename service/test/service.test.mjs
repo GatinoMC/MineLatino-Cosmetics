@@ -13,6 +13,7 @@ import { createHttpServer } from '../src/http.mjs';
 import { AiService, createAiServiceFromEnv } from '../src/ai.mjs';
 import { AfkUsageService } from '../src/afkUsage.mjs';
 import { normalizePublicServerAddress } from '../src/competitionServers.mjs';
+import { mergePlaytimeLeaderboard } from '../src/playtimeLeaderboard.mjs';
 import { DatabaseSync } from 'node:sqlite';
 
 const OWNER = '1234567890abcdef1234567890abcdef';
@@ -237,6 +238,14 @@ test('game token equips and publishes account cosmetics for offline identities',
     data: { uuid: offlineId, name: 'OfflineUser' } })).status, 200);
   assert.equal((await request('/v1/account/presence', { method: 'POST', token: game.data.token,
     data: { uuid: OTHER, name: 'OfflineUser' } })).status, 409);
+  const otherAccount = await request('/v1/account/register', { method: 'POST', data: {
+    email: 'other-offline@example.com', password: 'correct-horse-3', nick: 'OtherUser',
+  } });
+  assert.equal(otherAccount.status, 201);
+  assert.equal((await request('/v1/account/presence', { method: 'POST', token: game.data.token,
+    data: { uuid: offlineUuid('OtherUser'), name: 'OtherUser' } })).status, 409);
+  assert.throws(() => store.updateAccountPresence(registered.data.account.accountId,
+    offlineUuid('OtherUser'), 'OtherUser'), error => error.status === 403);
   const appearance = await request(`/v1/cosmetics/appearance?uuids=${offlineId}&names=OfflineUser`);
   assert.equal(appearance.data.identityMode, 'minelatino-account');
   assert.deepEqual(appearance.data.players[0].equipped, [{ slot: 'CAPE', cosmeticId: 'cape' }]);
@@ -755,6 +764,27 @@ function fixtureWithResources(t, options = {}) {
   return { store, api, request, resourceDir };
 }
 
+test('playtime leaderboard includes every active account with zero for unrecorded hours', async t => {
+  const { request, store } = fixture(t, { fetchPlaytime: async () => Response.json({ items: [
+    { rank: 1, name: 'Played', playtime: 3_600_000, updatedAt: '2026-01-01T00:00:00Z' },
+    { rank: 2, name: 'Visitor', playtime: 1000, updatedAt: '2026-01-01T00:00:00Z' },
+    { rank: 3, name: 'Suspended', playtime: 500, updatedAt: '2026-01-01T00:00:00Z' },
+  ] }) });
+  for (const nick of ['Played', 'NeverPlayed', 'Suspended']) {
+    const registered = await request('/v1/account/register', { method: 'POST', data: {
+      email: `${nick.toLowerCase()}@example.com`, password: 'correct-horse-test', nick,
+    } });
+    assert.equal(registered.status, 201);
+    if (nick === 'Suspended') store.updatePlayerAccount(registered.data.account.accountId, { status: 'suspended' });
+  }
+  const result = await request('/v1/launcher/playtime-leaderboard');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.data.items.map(item => [item.rank, item.name, item.playtime]), [
+    [1, 'Played', 3_600_000], [2, 'Visitor', 1000], [3, 'NeverPlayed', 0],
+  ]);
+  assert.equal(mergePlaytimeLeaderboard([], [{ nick: 'One', status: 'active' }])[0].playtime, 0);
+});
+
 test('admin publishes versioned launcher resource packs and clients receive a verified manifest', async t => {
   const { store, request, resourceDir } = fixtureWithResources(t);
   const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(18)]);
@@ -1156,6 +1186,7 @@ test('AFK Farm time is assigned by admin, metered by server time, and blocks at 
     email: 'afk-time@example.com', password: 'correct-horse-afk', nick: 'AfkTimer',
   } });
   const accountId = registered.data.account.accountId;
+  store.updateAccountPresence(accountId, offlineUuid('AfkTimer'), 'AfkTimer', clock);
   const emptyToken = await request('/v1/afk/token', { method: 'POST', token: registered.data.token, data: {} });
   assert.equal(emptyToken.status, 201);
   assert.equal(emptyToken.data.scope, 'afk');
@@ -1174,6 +1205,7 @@ test('AFK Farm time is assigned by admin, metered by server time, and blocks at 
   const started = await request('/v1/afk/sessions', { method: 'POST', token: emptyToken.data.token, data: {} });
   assert.equal(started.status, 201);
   assert.equal(started.data.active, true);
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, [offlineUuid('AfkTimer')]);
   clock += 20_000;
   const heartbeat = await request(`/v1/afk/sessions/${started.data.sessionId}/heartbeat`, {
     method: 'POST', token: emptyToken.data.token, data: {},
@@ -1185,8 +1217,34 @@ test('AFK Farm time is assigned by admin, metered by server time, and blocks at 
   });
   assert.equal(exhausted.data.remainingSeconds, 0);
   assert.equal(exhausted.data.exhausted, true);
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, []);
   assert.equal((await request('/v1/afk/sessions', { method: 'POST', token: emptyToken.data.token, data: {} })).status, 402);
   assert.equal((await request('/v1/account/logout', { method: 'POST', token: registered.data.token, data: {} })).status, 200);
   assert.equal((await request('/v1/afk/status', { token: emptyToken.data.token })).status, 401,
     'revoking the parent session must revoke its AFK capability');
+});
+
+test('temporary AFK badge disappears after a stale heartbeat or explicit stop', async t => {
+  let clock = 1_800_000_000_000;
+  const { store, request } = fixture(t, { now: () => clock });
+  const registered = await request('/v1/account/register', { method: 'POST', data: {
+    email: 'afk-badge@example.com', password: 'correct-horse-test', nick: 'AfkBadge',
+  } });
+  const accountId = registered.data.account.accountId;
+  store.updateAccountPresence(accountId, offlineUuid('AfkBadge'), 'AfkBadge', clock);
+  const capability = await request('/v1/afk/token', { method: 'POST', token: registered.data.token, data: {} });
+  await request(`/v1/admin/player-accounts/${accountId}/afk-time`, { method: 'PUT', token: ADMIN,
+    data: { mode: 'set', seconds: 120, reason: 'Badge test' } });
+  const started = await request('/v1/afk/sessions', { method: 'POST', token: capability.data.token, data: {} });
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, [offlineUuid('AfkBadge')]);
+  clock += 46_000;
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, []);
+  await request(`/v1/afk/sessions/${started.data.sessionId}/heartbeat`, {
+    method: 'POST', token: capability.data.token, data: {},
+  });
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, [offlineUuid('AfkBadge')]);
+  await request(`/v1/afk/sessions/${started.data.sessionId}/stop`, {
+    method: 'POST', token: capability.data.token, data: {},
+  });
+  assert.deepEqual((await request('/v1/afk/active-players')).data.uuids, []);
 });

@@ -31,7 +31,8 @@ const publicDir = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'publ
 // Premium is secure-by-default. Setting the flag to false can temporarily stop
 // premium login during an incident, but never enables an offline UUID bypass.
 const premiumEnabled = process.env.COSMETICS_ENABLE_PREMIUM !== 'false';
-const api = createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin, premiumEnabled });
+const api = createApi({ store, adminToken, adminAuth, accountAuth, commerce, ai, afkUsage, resourceDir, origin, premiumEnabled,
+  playtimeBackendUrl: (process.env.PLAYTIME_BACKEND_URL || 'https://minelatino-production.up.railway.app').replace(/\/$/, '') });
 const trustedProxyAddresses = (process.env.COSMETICS_TRUSTED_PROXY_ADDRESSES || '').split(',').map(value => value.trim()).filter(Boolean);
 const server = createHttpServer(api, origin, publicDir, {
   trustRailwayProxy: !!process.env.RAILWAY_ENVIRONMENT_ID,

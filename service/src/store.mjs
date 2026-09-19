@@ -458,6 +458,11 @@ export class Store {
     return result;
   }
 
+  rankingAccounts() {
+    return this.db.prepare('SELECT nick,status FROM player_accounts ORDER BY nick COLLATE NOCASE')
+      .all();
+  }
+
   // ── Anonymous, opt-in launcher statistics ──────────────────────────
 
   replaceCompetitionServers(installationHash, addresses, now = Date.now()) {
@@ -580,6 +585,15 @@ export class Store {
 
   activeAfkSession(accountId) {
     return this.db.prepare("SELECT * FROM afk_usage_sessions WHERE account_id=? AND status='active'").get(accountId);
+  }
+
+  activeAfkProfiles(now = Date.now()) {
+    return this.db.prepare(`SELECT DISTINCT lower(p.profile_uuid) AS uuid FROM afk_usage_sessions s
+      JOIN player_accounts a ON a.account_id=s.account_id AND a.status='active'
+      JOIN account_presence p ON p.account_id=s.account_id AND p.name=a.nick COLLATE NOCASE
+      WHERE s.status='active' AND s.last_heartbeat_at>=?
+        AND p.updated_at>=? AND length(replace(p.profile_uuid,'-',''))=32`)
+      .all(now - 45_000, now - 30 * 60_000).map(row => row.uuid);
   }
 
   createAfkSession(accountId, id, now) {
@@ -745,9 +759,9 @@ export class Store {
   updateAccountPresence(accountId, profileUuid, name, now = Date.now()) {
     profileUuid = uuid(profileUuid); name = text(name, 16);
     requireThat(/^[A-Za-z0-9_]{3,16}$/.test(name), 'Nombre de Minecraft inválido');
-    const duplicateNick = this.db.prepare(`SELECT COUNT(*) count FROM player_accounts
-      WHERE nick=? COLLATE NOCASE AND status='active'`).get(name).count;
-    requireThat(duplicateNick === 1, 'Este nick pertenece a varias cuentas; elige un nick único para mostrar cosméticos', 409);
+    const account = this.accountById(accountId, true);
+    requireThat(account?.status === 'active' && account.nick.toLowerCase() === name.toLowerCase(),
+      'El nick de Minecraft no pertenece a esta cuenta', 403);
     requireThat(profileUuid === offlineUuid(name), 'El UUID del servidor no corresponde al nick de tu cuenta', 409);
     const claimed = this.db.prepare('SELECT account_id FROM account_presence WHERE profile_uuid=? AND account_id<>?').get(profileUuid, accountId);
     requireThat(!claimed, 'Esta identidad ya está vinculada a otra cuenta', 409);
