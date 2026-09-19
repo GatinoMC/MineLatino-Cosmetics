@@ -1,74 +1,74 @@
 [
   {
-    "id": "minelatino-cosmetics",
-    "name": "MineLatino Cosmetics",
     "versions": [
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-fabric-1.21.4-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-fabric-1.21.4-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "1.21.4"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-fabric-1.21.4-0.1.0-alpha.53.jar",
+        "sha1": "b13281e1ae580b0af484c3c084825d1a0f959e82",
         "loader": "fabric",
-        "fileSize": 185994,
-        "fileName": "minelatino-cosmetics-fabric-1.21.4-0.1.0-alpha.52.jar",
-        "sha1": "a9401c0925accfe709b55c47e674b7e62aae5190"
+        "fileSize": 190343
       },
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-forge-1.21.4-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-forge-1.21.4-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "1.21.4"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-forge-1.21.4-0.1.0-alpha.53.jar",
+        "sha1": "f7bc18f93e38217465d1c4032293414a6a3a8b5e",
         "loader": "forge",
-        "fileSize": 189549,
-        "fileName": "minelatino-cosmetics-forge-1.21.4-0.1.0-alpha.52.jar",
-        "sha1": "2496b593b6ddb9872d4953715837022b92324048"
+        "fileSize": 193866
       },
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-fabric-1.21.11-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-fabric-1.21.11-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "1.21.11"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-fabric-1.21.11-0.1.0-alpha.53.jar",
+        "sha1": "9ea5824e381fbd30517935ba73850134b642e770",
         "loader": "fabric",
-        "fileSize": 187107,
-        "fileName": "minelatino-cosmetics-fabric-1.21.11-0.1.0-alpha.52.jar",
-        "sha1": "e9d0a2102448d473c6de0ba8ea74b4d9c379b5ea"
+        "fileSize": 191487
       },
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-forge-1.21.11-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-forge-1.21.11-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "1.21.11"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-forge-1.21.11-0.1.0-alpha.53.jar",
+        "sha1": "49f30153e6966c498e84e2ae4774babb270c1540",
         "loader": "forge",
-        "fileSize": 190611,
-        "fileName": "minelatino-cosmetics-forge-1.21.11-0.1.0-alpha.52.jar",
-        "sha1": "3c46ce167315df41c2b9dc9e067955bdec375ff8"
+        "fileSize": 195036
       },
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-fabric-26.2-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-fabric-26.2-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "26.2"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-fabric-26.2-0.1.0-alpha.53.jar",
+        "sha1": "4a8c626925d9468757fa11bf88d84e5c404bf951",
         "loader": "fabric",
-        "fileSize": 189947,
-        "fileName": "minelatino-cosmetics-fabric-26.2-0.1.0-alpha.52.jar",
-        "sha1": "1cf94cd5cafe14b61d84aa5f8b318573fc1ddf7b"
+        "fileSize": 194435
       },
       {
-        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.52/minelatino-cosmetics-forge-26.2-0.1.0-alpha.52.jar",
+        "downloadUrl": "https://github.com/GatinoMC/MineLatino-Cosmetics/releases/download/v0.1.0-alpha.53/minelatino-cosmetics-forge-26.2-0.1.0-alpha.53.jar",
         "minecraftVersions": [
           "26.2"
         ],
-        "modVersion": "0.1.0-alpha.52",
+        "modVersion": "0.1.0-alpha.53",
+        "fileName": "minelatino-cosmetics-forge-26.2-0.1.0-alpha.53.jar",
+        "sha1": "6e1866701cc58dc501b10f36ff2436f219991f87",
         "loader": "forge",
-        "fileSize": 194138,
-        "fileName": "minelatino-cosmetics-forge-26.2-0.1.0-alpha.52.jar",
-        "sha1": "b67bddb1cc9bf40634514b9107aee4894340c10c"
+        "fileSize": 198593
       }
-    ]
+    ],
+    "name": "MineLatino Cosmetics",
+    "id": "minelatino-cosmetics"
   }
 ]
